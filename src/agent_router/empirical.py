@@ -71,7 +71,11 @@ class EmpiricalSuccessModel:
             case = case_map.get(run.case_id)
             if case is None:
                 raise ValueError(f"run references unknown case {run.case_id!r}")
-            success = run.success if run.success is not None else run.quality >= case.minimum_quality
+            success = (
+                run.success
+                if run.success is not None
+                else run.quality >= case.minimum_quality
+            )
             key = task_feature_key(case_to_task(case))
             global_counts[run.model][1] += 1
             feature_counts[(run.model, key)][1] += 1
@@ -79,22 +83,28 @@ class EmpiricalSuccessModel:
                 global_counts[run.model][0] += 1
                 feature_counts[(run.model, key)][0] += 1
 
-        model._global = {name: tuple(values) for name, values in global_counts.items()}
-        model._feature = {key: tuple(values) for key, values in feature_counts.items()}
+        model._global = {
+            name: tuple(values) for name, values in global_counts.items()
+        }
+        model._feature = {
+            key: tuple(values) for key, values in feature_counts.items()
+        }
         return model
 
     def estimate(self, model: str, task: Task) -> SuccessEstimate:
         feature_key = task_feature_key(task)
         global_successes, global_trials = self._global.get(model, (0, 0))
-        global_probability = (
-            self.prior_alpha + global_successes
-        ) / (
+        global_probability = (self.prior_alpha + global_successes) / (
             self.prior_alpha + self.prior_beta + global_trials
         )
 
         successes, trials = self._feature.get((model, feature_key), (0, 0))
         alpha = self.prior_alpha + self.feature_weight * global_probability + successes
-        beta = self.prior_beta + self.feature_weight * (1.0 - global_probability) + (trials - successes)
+        beta = (
+            self.prior_beta
+            + self.feature_weight * (1.0 - global_probability)
+            + (trials - successes)
+        )
         probability = alpha / (alpha + beta)
         return SuccessEstimate(
             model=model,
