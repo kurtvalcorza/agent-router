@@ -5,6 +5,7 @@ from typing import Iterable
 
 from .catalog import ModelCatalog
 from .models import ModelProfile
+from .pricing import PricingProfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +15,7 @@ class ProviderModelSnapshot:
     context_window: int | None = None
     input_cost_per_million: float | None = None
     output_cost_per_million: float | None = None
+    pricing: PricingProfile | None = None
     metadata: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -66,13 +68,7 @@ def synchronize_catalog(
     pricing_as_of: str | None = None,
     pricing_source: str | None = None,
 ) -> SyncResult:
-    """Build a candidate catalog without changing locally governed policy fields.
-
-    Provider snapshots may update operational metadata (context and pricing), but
-    execution classes, capabilities, reliability, aliases, and local metadata remain
-    pinned to the current catalog. Unknown provider models are reported as warnings;
-    they are not auto-added because they have no locally reviewed capability policy.
-    """
+    """Build a candidate catalog without changing locally governed policy fields."""
 
     by_key = {(profile.provider, profile.name): profile for profile in current.profiles}
     snapshot_by_key: dict[tuple[str, str], ProviderModelSnapshot] = {}
@@ -100,6 +96,18 @@ def synchronize_catalog(
         if snapshot.metadata:
             metadata["provider_snapshot"] = dict(snapshot.metadata)
 
+        pricing = snapshot.pricing
+        standard_input = (
+            pricing.standard_input
+            if pricing is not None
+            else snapshot.input_cost_per_million
+        )
+        standard_output = (
+            pricing.standard_output
+            if pricing is not None
+            else snapshot.output_cost_per_million
+        )
+
         profiles.append(
             replace(
                 profile,
@@ -109,15 +117,16 @@ def synchronize_catalog(
                     else profile.context_window
                 ),
                 input_cost_per_million=(
-                    snapshot.input_cost_per_million
-                    if snapshot.input_cost_per_million is not None
+                    standard_input
+                    if standard_input is not None
                     else profile.input_cost_per_million
                 ),
                 output_cost_per_million=(
-                    snapshot.output_cost_per_million
-                    if snapshot.output_cost_per_million is not None
+                    standard_output
+                    if standard_output is not None
                     else profile.output_cost_per_million
                 ),
+                pricing=pricing if pricing is not None else profile.pricing,
                 metadata=metadata,
             )
         )
@@ -151,6 +160,7 @@ def diff_catalogs(before: ModelCatalog, after: ModelCatalog) -> CatalogDiff:
         "context_window",
         "input_cost_per_million",
         "output_cost_per_million",
+        "pricing",
         "reliability",
         "execution_classes",
         "capabilities",
@@ -167,30 +177,14 @@ def diff_catalogs(before: ModelCatalog, after: ModelCatalog) -> CatalogDiff:
     if before.aliases != after.aliases:
         changed.append(CatalogChange("<catalog>", "aliases", before.aliases, after.aliases))
     if before.metadata.pricing_as_of != after.metadata.pricing_as_of:
-        changed.append(
-            CatalogChange(
-                "<catalog>",
-                "pricing_as_of",
-                before.metadata.pricing_as_of,
-                after.metadata.pricing_as_of,
-            )
-        )
+        changed.append(CatalogChange("<catalog>", "pricing_as_of", before.metadata.pricing_as_of, after.metadata.pricing_as_of))
     if before.metadata.pricing_source != after.metadata.pricing_source:
-        changed.append(
-            CatalogChange(
-                "<catalog>",
-                "pricing_source",
-                before.metadata.pricing_source,
-                after.metadata.pricing_source,
-            )
-        )
+        changed.append(CatalogChange("<catalog>", "pricing_source", before.metadata.pricing_source, after.metadata.pricing_source))
 
     return CatalogDiff(added=added, removed=removed, changed=tuple(changed))
 
 
 def validate_promotion(current: ModelCatalog, candidate: ModelCatalog) -> None:
-    """Reject provider-driven changes to locally governed routing policy."""
-
     old = {profile.name: profile for profile in current.profiles}
     new = {profile.name: profile for profile in candidate.profiles}
 
