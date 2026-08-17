@@ -13,7 +13,9 @@ Task normalization
   ↓
 Hard routing policy ──→ deterministic/tool execution
   ↓
-Capability matching
+Adaptive policy mode
+  ↓
+Capability + reliability + budget filtering
   ↓
 cheapest eligible executor/model
   ↓
@@ -32,121 +34,43 @@ The core principles are:
 - **Budgets are first-class.** Cost, latency, model-call, and tool-call ceilings travel with a run.
 - **Observable by default.** Every route can emit a structured decision and execution event.
 
-## Status
+## Policy modes
 
-The package currently provides:
+`AdaptivePolicy` provides four reusable operating modes:
+
+- `economy` — lowest reliability floor; aggressively prefers low-cost eligible models.
+- `balanced` — moderate reliability floor for general-purpose workloads.
+- `quality` — excludes lower-reliability models before cost ranking.
+- `critical` — highest reliability floor and intended for high-consequence workloads.
+
+Risk and explicit `HIGH_RELIABILITY` requirements can raise the floor above the mode default. Remaining run budget is also applied before invocation, so models whose estimated call cost exceeds the available budget are excluded.
+
+```python
+from agent_router import AdaptivePolicy, PolicyMode, RoutedModelExecutor
+
+executor = RoutedModelExecutor(
+    registry=registry,
+    invoke=invoke,
+    adaptive_policy=AdaptivePolicy(PolicyMode.QUALITY),
+)
+```
+
+## Current capabilities
 
 - task and capability models
-- execution classes and routing decisions
-- hard-policy routing
+- execution classes and hard-policy routing
 - budget accounting
 - pluggable executors and verifiers
 - verification-driven escalation
 - structured telemetry hooks
 - provider-neutral model profiles and registry
 - capability/context/reliability eligibility filtering
+- adaptive `economy`, `balanced`, `quality`, and `critical` policies
+- remaining-budget filtering before model invocation
 - cheapest-eligible-model selection using estimated token cost
 - same-class provider/model fallback when an invocation fails
 
 Concrete provider SDK adapters and learned routing remain outside the core package.
-
-## Model routing
-
-```python
-from agent_router import (
-    ExecutionClass,
-    ModelProfile,
-    ModelRegistry,
-    ModelResponse,
-    Requirement,
-    RoutedModelExecutor,
-    RouterRuntime,
-    Task,
-)
-
-registry = ModelRegistry(
-    [
-        ModelProfile(
-            name="small-model",
-            provider="provider-a",
-            execution_classes={ExecutionClass.LIGHT_REASONING},
-            capabilities={Requirement.SEMANTIC_REASONING},
-            context_window=128_000,
-            input_cost_per_million=0.25,
-            output_cost_per_million=1.00,
-            reliability=0.90,
-        ),
-        ModelProfile(
-            name="strong-model",
-            provider="provider-b",
-            execution_classes={
-                ExecutionClass.LIGHT_REASONING,
-                ExecutionClass.DEEP_REASONING,
-            },
-            capabilities={
-                Requirement.SEMANTIC_REASONING,
-                Requirement.DEEP_PLANNING,
-            },
-            context_window=200_000,
-            input_cost_per_million=3.00,
-            output_cost_per_million=15.00,
-            reliability=0.98,
-        ),
-    ]
-)
-
-
-def invoke(provider: str, model: str, task: Task) -> ModelResponse:
-    # Dispatch to the relevant provider SDK here.
-    return ModelResponse(output={"provider": provider, "model": model})
-
-
-runtime = RouterRuntime()
-model_executor = RoutedModelExecutor(registry=registry, invoke=invoke)
-runtime.register_executor(ExecutionClass.LIGHT_REASONING, model_executor)
-runtime.register_executor(ExecutionClass.DEEP_REASONING, model_executor)
-
-result = runtime.execute(
-    Task(
-        kind="semantic-analysis",
-        payload={"question": "What is driving this change?"},
-        requirements={Requirement.SEMANTIC_REASONING},
-        metadata={
-            "estimated_input_tokens": 4_000,
-            "estimated_output_tokens": 800,
-        },
-    )
-)
-```
-
-## Deterministic quick start
-
-```python
-from agent_router import (
-    ExecutionClass,
-    ExecutionResult,
-    Requirement,
-    RouterRuntime,
-    Task,
-)
-
-runtime = RouterRuntime()
-
-runtime.register_executor(
-    ExecutionClass.DETERMINISTIC,
-    lambda task, ctx: ExecutionResult(output={"answer": 42}),
-)
-
-result = runtime.execute(
-    Task(
-        kind="arithmetic",
-        payload={"expression": "6 * 7"},
-        requirements={Requirement.EXACT_COMPUTATION},
-    )
-)
-
-assert result.output == {"answer": 42}
-```
 
 ## Development
 
