@@ -16,6 +16,7 @@ from .model_executor import ModelInvocationFailed, ModelResponse, RoutedModelExe
 from .models import ModelProfile, ModelRegistry, NoEligibleModel
 from .policy import RoutingPolicy
 from .pricing import PricingProfile
+from .pricing_sources import ANTHROPIC_PRICING_URL, AnthropicPricingSource, PricingSourceError
 from .provenance import InventoryRecord, PricingRecord, SourceProvenance
 from .providers import (
     AnthropicMessagesAdapter,
@@ -23,12 +24,7 @@ from .providers import (
     ProviderInvoker,
     UnknownProvider,
 )
-from .reconcile import (
-    AvailabilityObservation,
-    AvailabilityStatus,
-    ReconciliationResult,
-    reconcile_records,
-)
+from .reconcile import AvailabilityObservation, AvailabilityStatus, ReconciliationResult, reconcile_records
 from .runtime import RouterRuntime
 from .types import (
     Budget,
@@ -46,8 +42,10 @@ from .types import (
 )
 
 __all__ = [
+    "ANTHROPIC_PRICING_URL",
     "AdaptivePolicy",
     "AnthropicMessagesAdapter",
+    "AnthropicPricingSource",
     "AvailabilityObservation",
     "AvailabilityStatus",
     "Budget",
@@ -72,6 +70,7 @@ __all__ = [
     "PolicyMode",
     "PricingProfile",
     "PricingRecord",
+    "PricingSourceError",
     "ProviderInvoker",
     "ProviderModelSnapshot",
     "ReconciliationResult",
