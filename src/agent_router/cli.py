@@ -46,8 +46,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     reconcile = catalog_sub.add_parser(
         "reconcile",
-        help="combine provider inventory, pricing, and prior availability state into snapshots",
+        help="combine managed models, provider inventory, pricing, and prior state into snapshots",
     )
+    reconcile.add_argument("catalog")
     reconcile.add_argument("--inventory", required=True)
     reconcile.add_argument("--pricing")
     reconcile.add_argument("--previous-state")
@@ -77,31 +78,23 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "catalog" and args.catalog_command == "check":
             catalog = load_catalog(args.catalog)
-            print(
-                f"OK {args.catalog}: {len(catalog.profiles)} models, "
-                f"{len(catalog.aliases)} aliases"
-            )
+            print(f"OK {args.catalog}: {len(catalog.profiles)} models, {len(catalog.aliases)} aliases")
             return 0
 
         if args.command == "catalog" and args.catalog_command == "diff":
-            before = load_catalog(args.before)
-            after = load_catalog(args.after)
-            return _print_diff(diff_catalogs(before, after))
+            return _print_diff(diff_catalogs(load_catalog(args.before), load_catalog(args.after)))
 
         if args.command == "catalog" and args.catalog_command == "sync":
             current = load_catalog(args.catalog)
-            snapshots = load_snapshots(args.snapshots)
             result = synchronize_catalog(
                 current,
-                snapshots,
+                load_snapshots(args.snapshots),
                 pricing_as_of=args.pricing_as_of,
                 pricing_source=args.pricing_source,
             )
             output = Path(args.output)
             if output.resolve() == Path(args.catalog).resolve():
-                raise ValueError(
-                    "catalog sync refuses to overwrite the pinned catalog; use a candidate path"
-                )
+                raise ValueError("catalog sync refuses to overwrite the pinned catalog; use a candidate path")
             write_catalog(output, result.candidate)
             for warning in result.warnings:
                 print(f"WARNING {warning}", file=sys.stderr)
@@ -110,56 +103,42 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "catalog" and args.catalog_command == "reconcile":
+            current = load_catalog(args.catalog)
             inventory = load_inventory(args.inventory)
             pricing = load_pricing(args.pricing) if args.pricing else ()
-            previous = (
-                load_availability_state(args.previous_state)
-                if args.previous_state
-                else ()
-            )
+            previous = load_availability_state(args.previous_state) if args.previous_state else ()
+            expected_models = ((profile.provider, profile.name) for profile in current.profiles)
             result = reconcile_records(
                 inventory,
                 pricing,
                 previous=previous,
+                expected_models=expected_models,
                 missing_threshold=args.missing_threshold,
             )
             write_availability_state(args.state_output, result.observations)
             write_snapshots(args.snapshots_output, result.snapshots)
             for warning in result.warnings:
                 print(f"WARNING {warning}", file=sys.stderr)
-            print(
-                f"wrote {len(result.observations)} availability observations to "
-                f"{args.state_output}"
-            )
+            print(f"wrote {len(result.observations)} availability observations to {args.state_output}")
             print(f"wrote {len(result.snapshots)} provider snapshots to {args.snapshots_output}")
             return 0
 
         if args.command == "pricing" and args.pricing_command == "fetch":
             mapping = _load_anthropic_model_map(args.model_map)
-            source = AnthropicPricingSource(
+            records = AnthropicPricingSource(
                 mapping["models"],
                 long_context_thresholds=mapping["long_context_thresholds"],
-            )
-            records = source.fetch()
+            ).fetch()
             write_pricing_records(args.output, records)
             print(f"wrote {len(records)} pricing records to {args.output}")
             return 0
 
         if args.command == "provider" and args.provider_command == "fetch":
-            fetcher = OpenAIInventoryFetcher.from_env()
-            records = fetcher.fetch()
+            records = OpenAIInventoryFetcher.from_env().fetch()
             write_inventory(args.output, records)
             print(f"wrote {len(records)} inventory records to {args.output}")
             return 0
-    except (
-        CatalogError,
-        SnapshotError,
-        RecordIOError,
-        PricingSourceError,
-        OSError,
-        RuntimeError,
-        ValueError,
-    ) as exc:
+    except (CatalogError, SnapshotError, RecordIOError, PricingSourceError, OSError, RuntimeError, ValueError) as exc:
         print(f"ERROR {exc}", file=sys.stderr)
         return 2
 
@@ -176,7 +155,6 @@ def _load_anthropic_model_map(path: str | Path) -> dict[str, dict[str, object]]:
         raise ValueError("model map 'models' must be a non-empty object")
     if not all(isinstance(key, str) and isinstance(value, str) for key, value in models.items()):
         raise ValueError("model map 'models' must map display names to model IDs")
-
     thresholds = data.get("long_context_thresholds", {})
     if not isinstance(thresholds, dict):
         raise ValueError("long_context_thresholds must be an object")
@@ -187,7 +165,6 @@ def _load_anthropic_model_map(path: str | Path) -> dict[str, dict[str, object]]:
         if key not in models:
             raise ValueError(f"long-context model {key!r} is not present in the model map")
         normalized_thresholds[key] = value
-
     return {"models": dict(models), "long_context_thresholds": normalized_thresholds}
 
 
@@ -195,7 +172,6 @@ def _print_diff(diff) -> int:
     if diff.is_empty:
         print("no changes")
         return 0
-
     for name in diff.added:
         print(f"+ {name}")
     for name in diff.removed:
