@@ -10,6 +10,7 @@ from .pricing import PricingProfile
 from .provenance import PricingRecord, SourceProvenance
 
 ANTHROPIC_PRICING_URL = "https://docs.anthropic.com/en/docs/about-claude/pricing"
+OPENAI_MODEL_DOCS_BASE = "https://developers.openai.com/api/docs/models"
 
 
 class PricingSourceError(RuntimeError):
@@ -50,9 +51,24 @@ class _TableParser(HTMLParser):
             self._table = None
 
 
+class _TextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        value = " ".join(data.split())
+        if value:
+            self.parts.append(value)
+
+    @property
+    def text(self) -> str:
+        return " ".join(self.parts)
+
+
 def _default_fetch_text(url: str) -> str:
     request = Request(url, headers={"User-Agent": "agent-router/0.1 pricing-audit"})
-    with urlopen(request, timeout=20) as response:  # noqa: S310 - fixed/explicit HTTPS source
+    with urlopen(request, timeout=20) as response:  # noqa: S310 - explicit HTTPS source
         return response.read().decode("utf-8")
 
 
@@ -73,6 +89,88 @@ def _input_output_rates(value: str) -> tuple[float, float]:
     if "input" not in rates or "output" not in rates:
         raise PricingSourceError(f"expected input/output long-context rates, got {value!r}")
     return rates["input"], rates["output"]
+
+
+class OpenAIModelPricingSource:
+    """Parse reviewed OpenAI model documentation pages for token pricing.
+
+    A model-to-URL mapping is explicit so the adapter never guesses aliases or follows
+    marketing names. Each model page is authoritative for that concrete catalog ID.
+    """
+
+    def __init__(
+        self,
+        model_urls: dict[str, str],
+        *,
+        fetch_text: Callable[[str], str] = _default_fetch_text,
+        parser_version: str = "openai-model-doc-v1",
+    ) -> None:
+        self.model_urls = dict(model_urls)
+        self.fetch_text = fetch_text
+        self.parser_version = parser_version
+
+    def fetch(self) -> tuple[PricingRecord, ...]:
+        records: list[PricingRecord] = []
+        for model_id, url in self.model_urls.items():
+            html = self.fetch_text(url)
+            parser = _TextParser()
+            parser.feed(html)
+            text = parser.text
+            pricing = self._parse_pricing(text)
+            provenance = SourceProvenance.from_payload(
+                source=url,
+                payload=html,
+                parser_version=self.parser_version,
+            )
+            records.append(
+                PricingRecord(
+                    provider="openai",
+                    model_id=model_id,
+                    pricing=pricing,
+                    provenance=provenance,
+                    metadata={"pricing_model_page": url},
+                )
+            )
+        return tuple(records)
+
+    @staticmethod
+    def _parse_pricing(text: str) -> PricingProfile:
+        def price(label: str) -> float:
+            match = re.search(
+                rf"\b{re.escape(label)}\b\s*\$?([0-9]+(?:\.[0-9]+)?)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if match is None:
+                raise PricingSourceError(f"OpenAI model page missing {label!r} price")
+            return float(match.group(1))
+
+        standard_input = price("Input")
+        cached_input = price("Cached input")
+        standard_output = price("Output")
+        pricing = PricingProfile(
+            standard_input=standard_input,
+            standard_output=standard_output,
+            cached_input=cached_input,
+            cache_write=standard_input * 1.25,
+        )
+
+        long_match = re.search(
+            r">\s*([0-9]+)K\s+input tokens.*?([0-9.]+)x input.*?([0-9.]+)x output",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if long_match is not None:
+            threshold = int(long_match.group(1)) * 1000
+            input_multiplier = float(long_match.group(2))
+            output_multiplier = float(long_match.group(3))
+            pricing = replace(
+                pricing,
+                long_context_input=standard_input * input_multiplier,
+                long_context_output=standard_output * output_multiplier,
+                long_context_threshold=threshold,
+            )
+        return pricing
 
 
 class AnthropicPricingSource:
