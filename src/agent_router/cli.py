@@ -7,10 +7,20 @@ from pathlib import Path
 
 from .catalog import CatalogError, load_catalog
 from .catalog_sync import diff_catalogs, synchronize_catalog
+from .inventory import OpenAIInventoryFetcher
 from .pricing_io import write_pricing_records
 from .pricing_sources import AnthropicPricingSource, PricingSourceError
+from .reconcile import reconcile_records
+from .records_io import (
+    RecordIOError,
+    load_availability_state,
+    load_inventory,
+    load_pricing,
+    write_availability_state,
+    write_inventory,
+)
 from .serialize import write_catalog
-from .snapshot import SnapshotError, load_snapshots
+from .snapshot import SnapshotError, load_snapshots, write_snapshots
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,12 +44,29 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("--pricing-as-of")
     sync.add_argument("--pricing-source")
 
+    reconcile = catalog_sub.add_parser(
+        "reconcile",
+        help="combine provider inventory, pricing, and prior availability state into snapshots",
+    )
+    reconcile.add_argument("--inventory", required=True)
+    reconcile.add_argument("--pricing")
+    reconcile.add_argument("--previous-state")
+    reconcile.add_argument("--state-output", required=True)
+    reconcile.add_argument("--snapshots-output", required=True)
+    reconcile.add_argument("--missing-threshold", type=int, default=2)
+
     pricing = subparsers.add_parser("pricing", help="fetch normalized provider pricing")
     pricing_sub = pricing.add_subparsers(dest="pricing_command", required=True)
     pricing_fetch = pricing_sub.add_parser("fetch", help="fetch an authoritative pricing source")
     pricing_fetch.add_argument("provider", choices=["anthropic"])
     pricing_fetch.add_argument("--model-map", required=True)
     pricing_fetch.add_argument("--output", required=True)
+
+    provider = subparsers.add_parser("provider", help="fetch provider inventory metadata")
+    provider_sub = provider.add_subparsers(dest="provider_command", required=True)
+    provider_fetch = provider_sub.add_parser("fetch", help="fetch provider model inventory")
+    provider_fetch.add_argument("provider", choices=["openai"])
+    provider_fetch.add_argument("--output", required=True)
 
     return parser
 
@@ -82,6 +109,31 @@ def main(argv: list[str] | None = None) -> int:
             print(f"candidate written to {output}")
             return 0
 
+        if args.command == "catalog" and args.catalog_command == "reconcile":
+            inventory = load_inventory(args.inventory)
+            pricing = load_pricing(args.pricing) if args.pricing else ()
+            previous = (
+                load_availability_state(args.previous_state)
+                if args.previous_state
+                else ()
+            )
+            result = reconcile_records(
+                inventory,
+                pricing,
+                previous=previous,
+                missing_threshold=args.missing_threshold,
+            )
+            write_availability_state(args.state_output, result.observations)
+            write_snapshots(args.snapshots_output, result.snapshots)
+            for warning in result.warnings:
+                print(f"WARNING {warning}", file=sys.stderr)
+            print(
+                f"wrote {len(result.observations)} availability observations to "
+                f"{args.state_output}"
+            )
+            print(f"wrote {len(result.snapshots)} provider snapshots to {args.snapshots_output}")
+            return 0
+
         if args.command == "pricing" and args.pricing_command == "fetch":
             mapping = _load_anthropic_model_map(args.model_map)
             source = AnthropicPricingSource(
@@ -92,9 +144,17 @@ def main(argv: list[str] | None = None) -> int:
             write_pricing_records(args.output, records)
             print(f"wrote {len(records)} pricing records to {args.output}")
             return 0
+
+        if args.command == "provider" and args.provider_command == "fetch":
+            fetcher = OpenAIInventoryFetcher.from_env()
+            records = fetcher.fetch()
+            write_inventory(args.output, records)
+            print(f"wrote {len(records)} inventory records to {args.output}")
+            return 0
     except (
         CatalogError,
         SnapshotError,
+        RecordIOError,
         PricingSourceError,
         OSError,
         RuntimeError,
