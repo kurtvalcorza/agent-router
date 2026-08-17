@@ -7,6 +7,8 @@ from pathlib import Path
 
 from .catalog import CatalogError, load_catalog
 from .catalog_sync import diff_catalogs, synchronize_catalog
+from .empirical import EmpiricalSuccessModel
+from .empirical_io import EmpiricalModelIOError, write_empirical_model
 from .evaluation import compare_strategies, evaluate_gate, summarize_strategy
 from .evaluation_io import EvaluationIOError, load_cases, load_runs
 from .inventory import AnthropicInventoryFetcher, OpenAIInventoryFetcher
@@ -71,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     provider_fetch.add_argument("provider", choices=["openai", "anthropic"])
     provider_fetch.add_argument("--output", required=True)
 
-    evaluation = subparsers.add_parser("evaluation", help="summarize and gate benchmark results")
+    evaluation = subparsers.add_parser("evaluation", help="train, summarize, and gate benchmark results")
     evaluation_sub = evaluation.add_subparsers(dest="evaluation_command", required=True)
     report = evaluation_sub.add_parser("report", help="compare a strategy with a baseline")
     report.add_argument("--cases", required=True)
@@ -81,6 +83,17 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--minimum-cost-savings", type=float, default=0.0)
     report.add_argument("--maximum-quality-loss", type=float, default=0.0)
     report.add_argument("--maximum-success-rate-loss", type=float, default=0.0)
+
+    train = evaluation_sub.add_parser(
+        "train-empirical",
+        help="fit an empirical success model from historical benchmark runs",
+    )
+    train.add_argument("--cases", required=True)
+    train.add_argument("--runs", required=True)
+    train.add_argument("--output", required=True)
+    train.add_argument("--prior-alpha", type=float, default=1.0)
+    train.add_argument("--prior-beta", type=float, default=1.0)
+    train.add_argument("--feature-weight", type=float, default=3.0)
 
     return parser
 
@@ -172,6 +185,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"wrote {len(records)} inventory records to {args.output}")
             return 0
 
+        if args.command == "evaluation" and args.evaluation_command == "train-empirical":
+            cases = load_cases(args.cases)
+            runs = load_runs(args.runs)
+            model = EmpiricalSuccessModel.fit(
+                cases,
+                runs,
+                prior_alpha=args.prior_alpha,
+                prior_beta=args.prior_beta,
+                feature_weight=args.feature_weight,
+            )
+            write_empirical_model(args.output, model)
+            print(f"wrote empirical routing model to {args.output}")
+            return 0
+
         if args.command == "evaluation" and args.evaluation_command == "report":
             cases = load_cases(args.cases)
             runs = load_runs(args.runs)
@@ -207,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
         SnapshotError,
         RecordIOError,
         EvaluationIOError,
+        EmpiricalModelIOError,
         PricingSourceError,
         OSError,
         RuntimeError,
