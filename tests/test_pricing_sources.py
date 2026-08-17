@@ -11,6 +11,10 @@ HTML = """
 <tr><th>Model</th><th>Batch input</th><th>Batch output</th></tr>
 <tr><td>Claude Sonnet 4</td><td>$1.50 / MTok</td><td>$7.50 / MTok</td></tr>
 </table>
+<table>
+<tr><th>≤ 200K input tokens</th><th>&gt; 200K input tokens</th></tr>
+<tr><td>Input: $3 / MTok Output: $15 / MTok</td><td>Input: $6 / MTok Output: $22.50 / MTok</td></tr>
+</table>
 </body></html>
 """
 
@@ -34,3 +38,17 @@ def test_anthropic_pricing_source_parses_official_table_shape():
     assert record.pricing.batch_input == 1.50
     assert record.pricing.batch_output == 7.50
     assert record.provenance.content_hash
+
+
+def test_anthropic_pricing_source_applies_reviewed_long_context_rule():
+    source = AnthropicPricingSource(
+        {"Claude Sonnet 4": "claude-sonnet-4"},
+        long_context_thresholds={"Claude Sonnet 4": 200_000},
+        fetch_text=lambda url: HTML,
+    )
+
+    pricing = source.fetch()[0].pricing
+
+    assert pricing.long_context_threshold == 200_000
+    assert pricing.long_context_input == 6.0
+    assert pricing.long_context_output == 22.50
