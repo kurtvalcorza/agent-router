@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Iterable
 
 from .catalog_sync import ProviderModelSnapshot
-from .inventory import InventoryRecord, PricingRecord
+from .provenance import InventoryRecord, PricingRecord
 
 
 class AvailabilityStatus(str, Enum):
@@ -70,7 +70,9 @@ def reconcile_records(
             if status is AvailabilityStatus.SUSPECT_MISSING:
                 warnings.append(f"model missing once: {provider}/{model}")
             else:
-                warnings.append(f"model confirmed unavailable after repeated absence: {provider}/{model}")
+                warnings.append(
+                    f"model confirmed unavailable after repeated absence: {provider}/{model}"
+                )
 
         metadata: dict[str, object] = {}
         if inv is not None:
