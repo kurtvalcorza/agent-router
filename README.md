@@ -269,8 +269,13 @@ executor = RoutedModelExecutor(
 - hierarchical task/model success estimation
 - expected-total-cost empirical model selection
 - live empirical-router benchmark strategy
+- Python 3.11–3.13 CI plus wheel-build/install smoke validation
 
-The main remaining v0.1 work is production hardening: telemetry persistence/export, provider health and circuit breaking, caching, concurrency/rate-limit handling, and release polish.
+## v0.1 status
+
+The v0.1 architecture is feature-complete. Remaining items are intentionally deferred to later releases: telemetry exporters, persistent provider health/circuit breakers, shared caching, concurrency/rate-limit orchestration, richer benchmark graders, and service/dashboard integrations.
+
+See `CHANGELOG.md` for the v0.1.0 release scope.
 
 ## Development
 
@@ -280,6 +285,7 @@ Requires Python 3.11+.
 python -m pip install -e '.[dev]'
 pytest
 ruff check .
+python -m build
 ```
 
 ## Non-goals
