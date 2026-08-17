@@ -12,6 +12,7 @@ dependencies = []
 
 [project.scripts]
 agent-router = "agent_router.cli:main"
+agent-router-benchmark = "agent_router.benchmark_cli:main"
 
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
