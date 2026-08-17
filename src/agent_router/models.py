@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from .pricing import PricingProfile
 from .types import ExecutionClass, Requirement, Task
 
 
@@ -17,6 +18,7 @@ class ModelProfile:
     output_cost_per_million: float = 0.0
     reliability: float = 1.0
     metadata: dict[str, object] = field(default_factory=dict)
+    pricing: PricingProfile | None = None
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.reliability <= 1.0:
@@ -25,6 +27,13 @@ class ModelProfile:
             raise ValueError("model costs must be non-negative")
         if self.context_window is not None and self.context_window < 1:
             raise ValueError("context_window must be positive")
+
+    @property
+    def pricing_profile(self) -> PricingProfile:
+        return self.pricing or PricingProfile(
+            standard_input=self.input_cost_per_million,
+            standard_output=self.output_cost_per_million,
+        )
 
     def supports(self, task: Task, execution_class: ExecutionClass) -> bool:
         if execution_class not in self.execution_classes:
@@ -40,11 +49,22 @@ class ModelProfile:
             return False
         return True
 
-    def estimate_cost(self, *, input_tokens: int = 0, output_tokens: int = 0) -> float:
-        return (
-            input_tokens * self.input_cost_per_million
-            + output_tokens * self.output_cost_per_million
-        ) / 1_000_000
+    def estimate_cost(
+        self,
+        *,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cached_input_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        batch: bool = False,
+    ) -> float:
+        return self.pricing_profile.estimate(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_input_tokens=cached_input_tokens,
+            cache_write_tokens=cache_write_tokens,
+            batch=batch,
+        )
 
 
 class NoEligibleModel(RuntimeError):
