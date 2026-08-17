@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .adaptive import AdaptivePolicy
 from .models import ModelRegistry, NoEligibleModel
 from .types import ExecutionContext, ExecutionResult, Task
 
@@ -39,21 +40,38 @@ class RoutedModelExecutor:
         registry: ModelRegistry,
         invoke: ModelInvoker,
         min_reliability: float = 0.0,
+        adaptive_policy: AdaptivePolicy | None = None,
         token_estimator: TokenEstimator = default_token_estimator,
     ) -> None:
         self.registry = registry
         self.invoke = invoke
         self.min_reliability = min_reliability
+        self.adaptive_policy = adaptive_policy
         self.token_estimator = token_estimator
 
     def __call__(self, task: Task, context: ExecutionContext) -> ExecutionResult:
         estimated_input, estimated_output = self.token_estimator(task)
+        reliability_floor = self.min_reliability
+        if self.adaptive_policy is not None:
+            reliability_floor = max(
+                reliability_floor,
+                self.adaptive_policy.reliability_floor(task),
+            )
+
+        remaining_cost = None
+        if context.budget.max_cost_usd is not None:
+            remaining_cost = max(
+                context.budget.max_cost_usd - context.budget.cost_usd,
+                0.0,
+            )
+
         candidates = self.registry.ranked(
             task,
             context.decision.execution_class,
             input_tokens=estimated_input,
             output_tokens=estimated_output,
-            min_reliability=self.min_reliability,
+            min_reliability=reliability_floor,
+            max_estimated_cost=remaining_cost,
         )
         if not candidates:
             raise NoEligibleModel(
@@ -80,6 +98,7 @@ class RoutedModelExecutor:
                     "provider": profile.provider,
                     "input_tokens": response.input_tokens,
                     "output_tokens": response.output_tokens,
+                    "reliability_floor": reliability_floor,
                     "fallback_failures": tuple(failures),
                 }
             )
