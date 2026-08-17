@@ -20,6 +20,15 @@ from .catalog_sync import (
     synchronize_catalog,
     validate_promotion,
 )
+from .empirical import (
+    EmpiricalSelection,
+    EmpiricalSelector,
+    EmpiricalSuccessModel,
+    SuccessEstimate,
+    task_feature_key,
+)
+from .empirical_executor import EmpiricalRoutedModelExecutor
+from .empirical_io import EmpiricalModelIOError, load_empirical_model, write_empirical_model
 from .evaluation import (
     EvaluationCase,
     EvaluationRun,
@@ -34,6 +43,7 @@ from .evaluation_runner import StrategyResult, run_strategy
 from .inventory import AnthropicInventoryFetcher, OpenAIInventoryFetcher
 from .live_evaluation import (
     provider_invoker_from_catalog,
+    run_empirical_strategy,
     run_fixed_baseline,
     run_router_strategy,
 )
@@ -89,6 +99,11 @@ __all__ = [
     "CatalogError",
     "CatalogMetadata",
     "CatalogPromotionError",
+    "EmpiricalModelIOError",
+    "EmpiricalRoutedModelExecutor",
+    "EmpiricalSelection",
+    "EmpiricalSelector",
+    "EmpiricalSuccessModel",
     "EvaluationCase",
     "EvaluationIOError",
     "EvaluationRun",
@@ -123,6 +138,7 @@ __all__ = [
     "StrategyComparison",
     "StrategyResult",
     "StrategySummary",
+    "SuccessEstimate",
     "SyncResult",
     "Task",
     "TelemetryEvent",
@@ -138,17 +154,21 @@ __all__ = [
     "grade_output",
     "load_cases",
     "load_catalog",
+    "load_empirical_model",
     "load_runs",
     "parse_catalog",
     "promote_candidate",
     "provider_invoker_from_catalog",
     "reconcile_records",
+    "run_empirical_strategy",
     "run_fixed_baseline",
     "run_router_strategy",
     "run_strategy",
     "runtime_executor",
     "summarize_strategy",
     "synchronize_catalog",
+    "task_feature_key",
     "validate_promotion",
+    "write_empirical_model",
     "write_runs",
 ]
