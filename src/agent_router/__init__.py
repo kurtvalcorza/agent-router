@@ -11,12 +11,18 @@ from .catalog_sync import (
     synchronize_catalog,
     validate_promotion,
 )
-from .inventory import OpenAIInventoryFetcher
+from .inventory import AnthropicInventoryFetcher, OpenAIInventoryFetcher
 from .model_executor import ModelInvocationFailed, ModelResponse, RoutedModelExecutor
 from .models import ModelProfile, ModelRegistry, NoEligibleModel
 from .policy import RoutingPolicy
 from .pricing import PricingProfile
-from .pricing_sources import ANTHROPIC_PRICING_URL, AnthropicPricingSource, PricingSourceError
+from .pricing_sources import (
+    ANTHROPIC_PRICING_URL,
+    OPENAI_MODEL_DOCS_BASE,
+    AnthropicPricingSource,
+    OpenAIModelPricingSource,
+    PricingSourceError,
+)
 from .provenance import InventoryRecord, PricingRecord, SourceProvenance
 from .providers import (
     AnthropicMessagesAdapter,
@@ -43,7 +49,9 @@ from .types import (
 
 __all__ = [
     "ANTHROPIC_PRICING_URL",
+    "OPENAI_MODEL_DOCS_BASE",
     "AdaptivePolicy",
+    "AnthropicInventoryFetcher",
     "AnthropicMessagesAdapter",
     "AnthropicPricingSource",
     "AvailabilityObservation",
@@ -66,6 +74,7 @@ __all__ = [
     "ModelResponse",
     "NoEligibleModel",
     "OpenAIInventoryFetcher",
+    "OpenAIModelPricingSource",
     "OpenAIResponsesAdapter",
     "PolicyMode",
     "PricingProfile",
