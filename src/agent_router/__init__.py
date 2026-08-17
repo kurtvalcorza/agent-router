@@ -11,6 +11,15 @@ from .catalog_sync import (
     synchronize_catalog,
     validate_promotion,
 )
+from .evaluation import (
+    EvaluationCase,
+    EvaluationRun,
+    StrategyComparison,
+    StrategySummary,
+    compare_strategies,
+    evaluate_gate,
+    summarize_strategy,
+)
 from .inventory import AnthropicInventoryFetcher, OpenAIInventoryFetcher
 from .model_executor import ModelInvocationFailed, ModelResponse, RoutedModelExecutor
 from .models import ModelProfile, ModelRegistry, NoEligibleModel
@@ -63,6 +72,8 @@ __all__ = [
     "CatalogError",
     "CatalogMetadata",
     "CatalogPromotionError",
+    "EvaluationCase",
+    "EvaluationRun",
     "ExecutionClass",
     "ExecutionContext",
     "ExecutionResult",
@@ -90,17 +101,22 @@ __all__ = [
     "RouterRuntime",
     "RoutingPolicy",
     "SourceProvenance",
+    "StrategyComparison",
+    "StrategySummary",
     "SyncResult",
     "Task",
     "TelemetryEvent",
     "UnknownProvider",
     "Verification",
     "VerificationStatus",
+    "compare_strategies",
     "diff_catalogs",
+    "evaluate_gate",
     "load_catalog",
     "parse_catalog",
     "promote_candidate",
     "reconcile_records",
+    "summarize_strategy",
     "synchronize_catalog",
     "validate_promotion",
 ]
