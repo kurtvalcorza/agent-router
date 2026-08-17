@@ -94,7 +94,10 @@ class RouterRuntime:
                 attempt += 1
                 continue
 
-            decision = self._escalate(decision, verification.reason or "verification requested escalation")
+            decision = self._escalate(
+                decision,
+                verification.reason or "verification requested escalation",
+            )
             attempt += 1
 
         raise RuntimeError("execution exhausted retry/escalation budget")
@@ -109,5 +112,6 @@ class RouterRuntime:
 
     @staticmethod
     def _check_latency(budget: Budget, started: float) -> None:
-        if budget.max_latency_seconds is not None and monotonic() - started > budget.max_latency_seconds:
+        elapsed = monotonic() - started
+        if budget.max_latency_seconds is not None and elapsed > budget.max_latency_seconds:
             raise BudgetExceeded("latency budget exceeded")
