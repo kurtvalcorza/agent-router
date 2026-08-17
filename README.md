@@ -69,7 +69,7 @@ print(catalog.metadata.pricing_as_of)
 print(registry.get("fast").name)
 ```
 
-Catalog entries define provider, execution classes, capabilities, context window, locally governed reliability, and token pricing. Aliases such as `fast` or `strong` can point to concrete model names without changing application code.
+Catalog entries define provider, execution classes, capabilities, context window, locally governed reliability, and workload-aware token pricing. Aliases such as `fast` or `strong` can point to concrete model names without changing application code.
 
 `config/models.example.yaml` intentionally contains illustrative values only. Production catalogs should record an authoritative pricing source and date. Capability and reliability judgments remain local policy inputs rather than being inferred from provider marketing metadata.
 
@@ -82,24 +82,13 @@ from agent_router import ProviderModelSnapshot, promote_candidate, synchronize_c
 
 sync = synchronize_catalog(
     catalog,
-    [
-        ProviderModelSnapshot(
-            provider="openai",
-            name="small-model",
-            context_window=200_000,
-            input_cost_per_million=0.20,
-            output_cost_per_million=0.80,
-        )
-    ],
+    [ProviderModelSnapshot(provider="openai", name="small-model", context_window=200_000)],
     pricing_as_of="2026-08-17",
     pricing_source="provider-pricing-page",
 )
 
 for change in sync.diff.changed:
     print(change.model, change.field, change.before, "→", change.after)
-
-for warning in sync.warnings:
-    print("warning:", warning)
 
 catalog = promote_candidate(catalog, sync.candidate)
 ```
@@ -108,7 +97,7 @@ Synchronization intentionally updates only operational provider facts: context w
 
 ## CLI
 
-Installing the package exposes an `agent-router` command for catalog operations:
+Installing the package exposes an `agent-router` command:
 
 ```bash
 agent-router catalog check config/models.yaml
@@ -121,7 +110,30 @@ agent-router catalog sync config/models.yaml snapshots.json \
 
 `catalog sync` never overwrites the pinned source catalog. It writes a candidate file, prints warnings for unmanaged or missing provider models, and prints the structured diff for review.
 
-Provider fetchers implement a small `SnapshotFetcher` protocol and normalize upstream data into `ProviderModelSnapshot` records. Snapshot files use a provider-neutral JSON format, which keeps fetching credentials and provider-specific parsing separate from catalog review and promotion.
+### Anthropic pricing fetch
+
+Anthropic pricing is parsed from the official pricing page into normalized `PricingRecord` JSON. Display-name-to-model-ID mapping is explicit and reviewable; the parser does not infer API model IDs from marketing names.
+
+```bash
+agent-router pricing fetch anthropic \
+  --model-map config/anthropic-model-map.example.json \
+  --output .agent-router/anthropic-pricing.json
+```
+
+The model map may also declare reviewed long-context thresholds:
+
+```json
+{
+  "models": {
+    "Claude Sonnet 4": "claude-sonnet-4-20250514"
+  },
+  "long_context_thresholds": {
+    "Claude Sonnet 4": 200000
+  }
+}
+```
+
+When a reviewed threshold is declared, the pricing parser requires the official long-context pricing table and records its premium input/output rates in the `PricingProfile`. If the expected source structure is missing or changes, the fetch fails closed rather than guessing.
 
 ## Provider adapters
 
@@ -160,8 +172,6 @@ executor = RoutedModelExecutor(
 
 `OpenAIResponsesAdapter` uses the Responses API and defaults to `store=False`. `AnthropicMessagesAdapter` uses the Messages API. Both normalize output text and input/output token usage into `ModelResponse`; provider-specific response IDs and stop metadata remain available in result metadata.
 
-For custom task shapes, inject a `prompt_builder: Callable[[Task], str]` rather than teaching the routing core about provider prompt formats.
-
 ## Current capabilities
 
 - task and capability models
@@ -173,20 +183,22 @@ For custom task shapes, inject a `prompt_builder: Callable[[Task], str]` rather 
 - provider-neutral model profiles and registry
 - capability/context/reliability eligibility filtering
 - adaptive `economy`, `balanced`, `quality`, and `critical` policies
+- workload-aware standard/cache/batch/long-context pricing
 - remaining-budget filtering before model invocation
 - cheapest-eligible-model selection using estimated token cost
 - same-class provider/model fallback when an invocation fails
 - optional OpenAI Responses and Anthropic Messages adapters
-- provider dispatch through a common invocation contract
 - JSON/YAML declarative model catalogs
 - model aliases and catalog validation
 - dated pricing metadata and source provenance fields
 - candidate catalog synchronization and structured diffs
 - guarded catalog promotion that preserves locally reviewed policy
-- provider-neutral snapshot IO and fetcher protocol
-- operational `catalog check`, `catalog diff`, and `catalog sync` CLI commands
+- OpenAI model inventory fetcher with provenance
+- availability reconciliation with repeated-miss confirmation
+- Anthropic authoritative pricing parser with long-context rules
+- operational catalog and Anthropic pricing CLI commands
 
-Learned routing and concrete live provider metadata fetchers remain outside the core package.
+Learned routing and additional live provider pricing/inventory adapters remain outside the core package.
 
 ## Development
 
