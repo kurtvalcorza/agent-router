@@ -13,9 +13,15 @@ dependencies = []
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
 anthropic = ["anthropic>=0.40"]
+catalog = ["PyYAML>=6.0"]
 providers = [
   "openai>=1.0",
   "anthropic>=0.40",
+]
+all = [
+  "openai>=1.0",
+  "anthropic>=0.40",
+  "PyYAML>=6.0",
 ]
 dev = [
   "pytest>=8.0",
