@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import ModelProfile, ModelRegistry
+from .pricing import PricingProfile
 from .types import ExecutionClass, Requirement
 
 
@@ -54,68 +55,54 @@ def load_catalog(path: str | Path) -> ModelCatalog:
 def parse_catalog(data: object) -> ModelCatalog:
     if not isinstance(data, dict):
         raise CatalogError("catalog root must be an object")
-
-    version = _required_string(data, "version")
     metadata = CatalogMetadata(
-        version=version,
+        version=_required_string(data, "version"),
         pricing_as_of=_optional_string(data, "pricing_as_of"),
         pricing_source=_optional_string(data, "pricing_source"),
         metadata=_object_dict(data.get("metadata", {}), "metadata"),
     )
-
     raw_models = data.get("models")
     if not isinstance(raw_models, list) or not raw_models:
         raise CatalogError("catalog 'models' must be a non-empty list")
-
     profiles = tuple(_parse_profile(item, index) for index, item in enumerate(raw_models))
     names = {profile.name for profile in profiles}
     if len(names) != len(profiles):
         raise CatalogError("model names must be unique")
-
-    aliases = _parse_aliases(data.get("aliases", {}), names)
-    return ModelCatalog(metadata=metadata, profiles=profiles, aliases=aliases)
+    return ModelCatalog(metadata=metadata, profiles=profiles, aliases=_parse_aliases(data.get("aliases", {}), names))
 
 
 def _parse_profile(item: object, index: int) -> ModelProfile:
     if not isinstance(item, dict):
         raise CatalogError(f"models[{index}] must be an object")
-
-    name = _required_string(item, "name", prefix=f"models[{index}].")
-    provider = _required_string(item, "provider", prefix=f"models[{index}].")
-    execution_classes = _enum_set(
-        item.get("execution_classes"),
-        ExecutionClass,
-        f"models[{index}].execution_classes",
+    prefix = f"models[{index}]."
+    pricing_data = item.get("pricing", {})
+    if not isinstance(pricing_data, dict):
+        raise CatalogError(prefix + "pricing must be an object")
+    pp = prefix + "pricing."
+    standard_input = _non_negative_number(pricing_data.get("input_per_million", 0.0), pp + "input_per_million")
+    standard_output = _non_negative_number(pricing_data.get("output_per_million", 0.0), pp + "output_per_million")
+    pricing = PricingProfile(
+        standard_input=standard_input,
+        standard_output=standard_output,
+        cached_input=_optional_non_negative_number(pricing_data.get("cached_input_per_million"), pp + "cached_input_per_million"),
+        cache_write=_optional_non_negative_number(pricing_data.get("cache_write_per_million"), pp + "cache_write_per_million"),
+        batch_input=_optional_non_negative_number(pricing_data.get("batch_input_per_million"), pp + "batch_input_per_million"),
+        batch_output=_optional_non_negative_number(pricing_data.get("batch_output_per_million"), pp + "batch_output_per_million"),
+        long_context_input=_optional_non_negative_number(pricing_data.get("long_context_input_per_million"), pp + "long_context_input_per_million"),
+        long_context_output=_optional_non_negative_number(pricing_data.get("long_context_output_per_million"), pp + "long_context_output_per_million"),
+        long_context_threshold=_optional_positive_int(pricing_data, "long_context_threshold", pp),
     )
-    capabilities = _enum_set(
-        item.get("capabilities", []),
-        Requirement,
-        f"models[{index}].capabilities",
-    )
-
-    pricing = item.get("pricing", {})
-    if not isinstance(pricing, dict):
-        raise CatalogError(f"models[{index}].pricing must be an object")
-
     return ModelProfile(
-        name=name,
-        provider=provider,
-        execution_classes=execution_classes,
-        capabilities=capabilities,
-        context_window=_optional_positive_int(item, "context_window", f"models[{index}]."),
-        input_cost_per_million=_non_negative_number(
-            pricing.get("input_per_million", 0.0),
-            f"models[{index}].pricing.input_per_million",
-        ),
-        output_cost_per_million=_non_negative_number(
-            pricing.get("output_per_million", 0.0),
-            f"models[{index}].pricing.output_per_million",
-        ),
-        reliability=_bounded_number(
-            item.get("reliability", 1.0),
-            f"models[{index}].reliability",
-        ),
-        metadata=_object_dict(item.get("metadata", {}), f"models[{index}].metadata"),
+        name=_required_string(item, "name", prefix),
+        provider=_required_string(item, "provider", prefix),
+        execution_classes=_enum_set(item.get("execution_classes"), ExecutionClass, prefix + "execution_classes"),
+        capabilities=_enum_set(item.get("capabilities", []), Requirement, prefix + "capabilities"),
+        context_window=_optional_positive_int(item, "context_window", prefix),
+        input_cost_per_million=standard_input,
+        output_cost_per_million=standard_output,
+        reliability=_bounded_number(item.get("reliability", 1.0), prefix + "reliability"),
+        metadata=_object_dict(item.get("metadata", {}), prefix + "metadata"),
+        pricing=pricing,
     )
 
 
@@ -177,6 +164,10 @@ def _non_negative_number(value: object, path: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
         raise CatalogError(f"{path} must be a non-negative number")
     return float(value)
+
+
+def _optional_non_negative_number(value: object, path: str) -> float | None:
+    return None if value is None else _non_negative_number(value, path)
 
 
 def _bounded_number(value: object, path: str) -> float:
