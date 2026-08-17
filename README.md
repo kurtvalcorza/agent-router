@@ -38,6 +38,7 @@ The core principles are:
 - **Budgets are first-class.** Cost, latency, model-call, and tool-call ceilings travel with a run.
 - **Observable by default.** Every route can emit a structured decision and execution event.
 - **Pricing is data, not code.** Catalogs carry dated pricing metadata so cost updates do not require runtime changes.
+- **Provider facts do not define policy.** Upstream metadata may refresh prices and context limits, but capability, reliability, aliases, and execution-class assignments require local review.
 
 ## Policy modes
 
@@ -70,27 +71,56 @@ print(registry.get("fast").name)
 
 Catalog entries define provider, execution classes, capabilities, context window, locally governed reliability, and token pricing. Aliases such as `fast` or `strong` can point to concrete model names without changing application code.
 
-```yaml
-version: "2026-08-17"
-pricing_as_of: "2026-08-17"
-pricing_source: "authoritative-provider-pricing-page"
+`config/models.example.yaml` intentionally contains illustrative values only. Production catalogs should record an authoritative pricing source and date. Capability and reliability judgments remain local policy inputs rather than being inferred from provider marketing metadata.
 
-aliases:
-  fast: small-model
+## Catalog synchronization
 
-models:
-  - name: small-model
-    provider: openai
-    execution_classes: [light_reasoning]
-    capabilities: [semantic_reasoning]
-    context_window: 128000
-    reliability: 0.90
-    pricing:
-      input_per_million: 0.25
-      output_per_million: 1.00
+Provider metadata can be staged into a candidate catalog without automatically changing routing policy:
+
+```python
+from agent_router import ProviderModelSnapshot, promote_candidate, synchronize_catalog
+
+sync = synchronize_catalog(
+    catalog,
+    [
+        ProviderModelSnapshot(
+            provider="openai",
+            name="small-model",
+            context_window=200_000,
+            input_cost_per_million=0.20,
+            output_cost_per_million=0.80,
+        )
+    ],
+    pricing_as_of="2026-08-17",
+    pricing_source="provider-pricing-page",
+)
+
+for change in sync.diff.changed:
+    print(change.model, change.field, change.before, "→", change.after)
+
+for warning in sync.warnings:
+    print("warning:", warning)
+
+catalog = promote_candidate(catalog, sync.candidate)
 ```
 
-`config/models.example.yaml` intentionally contains illustrative values only. Production catalogs should record an authoritative pricing source and date. Capability and reliability judgments remain local policy inputs rather than being inferred from provider marketing metadata.
+Synchronization intentionally updates only operational provider facts: context windows, pricing, and provider snapshot metadata. Newly discovered models are reported but not auto-added because they have no reviewed capability or reliability policy. Promotion rejects changes to model membership, aliases, provider ownership, execution classes, capabilities, or reliability.
+
+This enables a safe refresh flow:
+
+```text
+provider metadata
+      ↓
+normalized snapshots
+      ↓
+candidate catalog
+      ↓
+diff + warnings
+      ↓
+validation gate
+      ↓
+explicit promotion
+```
 
 ## Provider adapters
 
@@ -150,8 +180,10 @@ For custom task shapes, inject a `prompt_builder: Callable[[Task], str]` rather 
 - JSON/YAML declarative model catalogs
 - model aliases and catalog validation
 - dated pricing metadata and source provenance fields
+- candidate catalog synchronization and structured diffs
+- guarded catalog promotion that preserves locally reviewed policy
 
-Learned routing and automated catalog refresh remain outside the core package.
+Learned routing and live provider metadata fetchers remain outside the core package.
 
 ## Development
 
