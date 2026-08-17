@@ -1,4 +1,13 @@
 from .adaptive import AdaptivePolicy, PolicyMode
+from .benchmark_runtime import (
+    BenchmarkSpecError,
+    Grade,
+    case_to_task,
+    execute_task_strategy,
+    fixed_model_executor,
+    grade_output,
+    runtime_executor,
+)
 from .catalog import CatalogError, CatalogMetadata, ModelCatalog, load_catalog, parse_catalog
 from .catalog_sync import (
     CatalogChange,
@@ -23,6 +32,11 @@ from .evaluation import (
 from .evaluation_io import EvaluationIOError, load_cases, load_runs, write_runs
 from .evaluation_runner import StrategyResult, run_strategy
 from .inventory import AnthropicInventoryFetcher, OpenAIInventoryFetcher
+from .live_evaluation import (
+    provider_invoker_from_catalog,
+    run_fixed_baseline,
+    run_router_strategy,
+)
 from .model_executor import ModelInvocationFailed, ModelResponse, RoutedModelExecutor
 from .models import ModelProfile, ModelRegistry, NoEligibleModel
 from .policy import RoutingPolicy
@@ -67,6 +81,7 @@ __all__ = [
     "AnthropicPricingSource",
     "AvailabilityObservation",
     "AvailabilityStatus",
+    "BenchmarkSpecError",
     "Budget",
     "BudgetExceeded",
     "CatalogChange",
@@ -80,6 +95,7 @@ __all__ = [
     "ExecutionClass",
     "ExecutionContext",
     "ExecutionResult",
+    "Grade",
     "InventoryRecord",
     "ModelCatalog",
     "ModelInvocationFailed",
@@ -113,16 +129,24 @@ __all__ = [
     "UnknownProvider",
     "Verification",
     "VerificationStatus",
+    "case_to_task",
     "compare_strategies",
     "diff_catalogs",
     "evaluate_gate",
+    "execute_task_strategy",
+    "fixed_model_executor",
+    "grade_output",
     "load_cases",
     "load_catalog",
     "load_runs",
     "parse_catalog",
     "promote_candidate",
+    "provider_invoker_from_catalog",
     "reconcile_records",
+    "run_fixed_baseline",
+    "run_router_strategy",
     "run_strategy",
+    "runtime_executor",
     "summarize_strategy",
     "synchronize_catalog",
     "validate_promotion",
