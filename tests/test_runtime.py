@@ -60,9 +60,13 @@ def test_failed_verification_escalates_to_stronger_executor() -> None:
 
 def test_budget_is_enforced_after_executor_reports_usage() -> None:
     runtime = RouterRuntime()
+
+    def costly_light_executor(task, ctx):
+        return ExecutionResult(output="answer", model_calls=1, cost_usd=0.02)
+
     runtime.register_executor(
         ExecutionClass.LIGHT_REASONING,
-        lambda task, ctx: ExecutionResult(output="answer", model_calls=1, cost_usd=0.02),
+        costly_light_executor,
     )
 
     task = Task(
