@@ -19,6 +19,8 @@ Capability + reliability + budget filtering
   ↓
 cheapest eligible executor/model
   ↓
+provider adapter
+  ↓
 verification
   ├─ PASS      → result
   ├─ RETRY     → bounded retry
@@ -55,6 +57,45 @@ executor = RoutedModelExecutor(
 )
 ```
 
+## Provider adapters
+
+The core package has no provider SDK dependency. Install only the adapters you need:
+
+```bash
+python -m pip install 'agent-router[openai]'
+python -m pip install 'agent-router[anthropic]'
+# or both
+python -m pip install 'agent-router[providers]'
+```
+
+Adapters expose one common invocation contract through `ProviderInvoker`:
+
+```python
+from agent_router import (
+    AnthropicMessagesAdapter,
+    OpenAIResponsesAdapter,
+    ProviderInvoker,
+    RoutedModelExecutor,
+)
+
+providers = ProviderInvoker(
+    {
+        "openai": OpenAIResponsesAdapter.from_env(),
+        "anthropic": AnthropicMessagesAdapter.from_env(max_tokens=2048),
+    }
+)
+
+executor = RoutedModelExecutor(
+    registry=registry,
+    invoke=providers,
+    adaptive_policy=adaptive_policy,
+)
+```
+
+`OpenAIResponsesAdapter` uses the Responses API and defaults to `store=False`. `AnthropicMessagesAdapter` uses the Messages API. Both normalize output text and input/output token usage into `ModelResponse`; provider-specific response IDs and stop metadata remain available in result metadata.
+
+For custom task shapes, inject a `prompt_builder: Callable[[Task], str]` rather than teaching the routing core about provider prompt formats.
+
 ## Current capabilities
 
 - task and capability models
@@ -69,8 +110,10 @@ executor = RoutedModelExecutor(
 - remaining-budget filtering before model invocation
 - cheapest-eligible-model selection using estimated token cost
 - same-class provider/model fallback when an invocation fails
+- optional OpenAI Responses and Anthropic Messages adapters
+- provider dispatch through a common invocation contract
 
-Concrete provider SDK adapters and learned routing remain outside the core package.
+Learned routing and dynamic model/pricing catalogs remain outside the core package.
 
 ## Development
 
