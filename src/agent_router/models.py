@@ -76,11 +76,20 @@ class ModelRegistry:
         input_tokens: int = 0,
         output_tokens: int = 0,
         min_reliability: float = 0.0,
+        max_estimated_cost: float | None = None,
     ) -> list[ModelProfile]:
         candidates = [
             profile
             for profile in self.eligible(task, execution_class)
             if profile.reliability >= min_reliability
+            and (
+                max_estimated_cost is None
+                or profile.estimate_cost(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+                <= max_estimated_cost
+            )
         ]
         return sorted(
             candidates,
@@ -102,6 +111,7 @@ class ModelRegistry:
         input_tokens: int = 0,
         output_tokens: int = 0,
         min_reliability: float = 0.0,
+        max_estimated_cost: float | None = None,
     ) -> ModelProfile:
         candidates = self.ranked(
             task,
@@ -109,6 +119,7 @@ class ModelRegistry:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             min_reliability=min_reliability,
+            max_estimated_cost=max_estimated_cost,
         )
         if not candidates:
             raise NoEligibleModel(
