@@ -1,0 +1,8 @@
+{
+  "models": {
+    "Claude Sonnet 4": "claude-sonnet-4-20250514"
+  },
+  "long_context_thresholds": {
+    "Claude Sonnet 4": 200000
+  }
+}
