@@ -15,15 +15,15 @@ agent-router = "agent_router.cli:main"
 
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
-anthropic = ["anthropic>=0.40"]
+anthropic = ["anthropic>=0.120"]
 catalog = ["PyYAML>=6.0"]
 providers = [
   "openai>=1.0",
-  "anthropic>=0.40",
+  "anthropic>=0.120",
 ]
 all = [
   "openai>=1.0",
-  "anthropic>=0.40",
+  "anthropic>=0.120",
   "PyYAML>=6.0",
 ]
 dev = [
