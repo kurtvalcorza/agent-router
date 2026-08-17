@@ -6,8 +6,9 @@ import sys
 from .adaptive import PolicyMode
 from .benchmark_runtime import BenchmarkSpecError
 from .catalog import CatalogError, load_catalog
+from .empirical_io import EmpiricalModelIOError, load_empirical_model
 from .evaluation_io import EvaluationIOError, load_cases, write_runs
-from .live_evaluation import run_fixed_baseline, run_router_strategy
+from .live_evaluation import run_empirical_strategy, run_fixed_baseline, run_router_strategy
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,9 +20,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mode", choices=[mode.value for mode in PolicyMode], default="balanced")
     parser.add_argument("--output", required=True)
     parser.add_argument(
+        "--empirical-model",
+        help="trained empirical routing model required by empirical-router strategy",
+    )
+    parser.add_argument(
+        "--recovery-cost-multiplier",
+        type=float,
+        default=1.0,
+        help="penalty applied to expected recovery cost after a model failure",
+    )
+    parser.add_argument(
         "--strategies",
         nargs="+",
-        choices=["router", "always-cheap", "always-strong"],
+        choices=["router", "empirical-router", "always-cheap", "always-strong"],
         default=["router", "always-cheap", "always-strong"],
     )
     return parser
@@ -39,6 +50,19 @@ def main(argv: list[str] | None = None) -> int:
                     cases,
                     catalog=catalog,
                     mode=PolicyMode(args.mode),
+                )
+            )
+        if "empirical-router" in args.strategies:
+            if not args.empirical_model:
+                raise ValueError("--empirical-model is required for empirical-router")
+            success_model = load_empirical_model(args.empirical_model)
+            runs.extend(
+                run_empirical_strategy(
+                    cases,
+                    catalog=catalog,
+                    success_model=success_model,
+                    mode=PolicyMode(args.mode),
+                    recovery_cost_multiplier=args.recovery_cost_multiplier,
                 )
             )
         if "always-cheap" in args.strategies:
@@ -67,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     except (
         BenchmarkSpecError,
         CatalogError,
+        EmpiricalModelIOError,
         EvaluationIOError,
         ImportError,
         KeyError,
