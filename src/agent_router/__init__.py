@@ -1,4 +1,5 @@
 from .adaptive import AdaptivePolicy, PolicyMode
+from .catalog import CatalogError, CatalogMetadata, ModelCatalog, load_catalog, parse_catalog
 from .model_executor import ModelInvocationFailed, ModelResponse, RoutedModelExecutor
 from .models import ModelProfile, ModelRegistry, NoEligibleModel
 from .policy import RoutingPolicy
@@ -29,9 +30,12 @@ __all__ = [
     "AnthropicMessagesAdapter",
     "Budget",
     "BudgetExceeded",
+    "CatalogError",
+    "CatalogMetadata",
     "ExecutionClass",
     "ExecutionContext",
     "ExecutionResult",
+    "ModelCatalog",
     "ModelInvocationFailed",
     "ModelProfile",
     "ModelRegistry",
@@ -51,4 +55,6 @@ __all__ = [
     "UnknownProvider",
     "Verification",
     "VerificationStatus",
+    "load_catalog",
+    "parse_catalog",
 ]
