@@ -23,6 +23,12 @@ from .providers import (
     ProviderInvoker,
     UnknownProvider,
 )
+from .reconcile import (
+    AvailabilityObservation,
+    AvailabilityStatus,
+    ReconciliationResult,
+    reconcile_records,
+)
 from .runtime import RouterRuntime
 from .types import (
     Budget,
@@ -42,6 +48,8 @@ from .types import (
 __all__ = [
     "AdaptivePolicy",
     "AnthropicMessagesAdapter",
+    "AvailabilityObservation",
+    "AvailabilityStatus",
     "Budget",
     "BudgetExceeded",
     "CatalogChange",
@@ -66,6 +74,7 @@ __all__ = [
     "PricingRecord",
     "ProviderInvoker",
     "ProviderModelSnapshot",
+    "ReconciliationResult",
     "Requirement",
     "Risk",
     "RouteDecision",
@@ -83,6 +92,7 @@ __all__ = [
     "load_catalog",
     "parse_catalog",
     "promote_candidate",
+    "reconcile_records",
     "synchronize_catalog",
     "validate_promotion",
 ]
