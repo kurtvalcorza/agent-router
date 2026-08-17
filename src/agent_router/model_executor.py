@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from .models import ModelRegistry
+from .models import ModelRegistry, NoEligibleModel
 from .types import ExecutionContext, ExecutionResult, Task
 
 
@@ -28,6 +28,10 @@ def default_token_estimator(task: Task) -> tuple[int, int]:
     )
 
 
+class ModelInvocationFailed(RuntimeError):
+    pass
+
+
 class RoutedModelExecutor:
     def __init__(
         self,
@@ -44,32 +48,47 @@ class RoutedModelExecutor:
 
     def __call__(self, task: Task, context: ExecutionContext) -> ExecutionResult:
         estimated_input, estimated_output = self.token_estimator(task)
-        profile = self.registry.select(
+        candidates = self.registry.ranked(
             task,
             context.decision.execution_class,
             input_tokens=estimated_input,
             output_tokens=estimated_output,
             min_reliability=self.min_reliability,
         )
+        if not candidates:
+            raise NoEligibleModel(
+                f"no eligible model for execution class "
+                f"{context.decision.execution_class.value}"
+            )
 
-        response = self.invoke(profile.provider, profile.name, task)
-        cost = profile.estimate_cost(
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-        )
-        metadata = dict(response.metadata or {})
-        metadata.update(
-            {
-                "model": profile.name,
-                "provider": profile.provider,
-                "input_tokens": response.input_tokens,
-                "output_tokens": response.output_tokens,
-            }
-        )
+        failures: list[str] = []
+        for profile in candidates:
+            try:
+                response = self.invoke(profile.provider, profile.name, task)
+            except Exception as exc:  # provider adapters normalize provider failures
+                failures.append(f"{profile.provider}/{profile.name}: {exc}")
+                continue
 
-        return ExecutionResult(
-            output=response.output,
-            cost_usd=cost,
-            model_calls=1,
-            metadata=metadata,
-        )
+            cost = profile.estimate_cost(
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+            )
+            metadata = dict(response.metadata or {})
+            metadata.update(
+                {
+                    "model": profile.name,
+                    "provider": profile.provider,
+                    "input_tokens": response.input_tokens,
+                    "output_tokens": response.output_tokens,
+                    "fallback_failures": tuple(failures),
+                }
+            )
+
+            return ExecutionResult(
+                output=response.output,
+                cost_usd=cost,
+                model_calls=len(failures) + 1,
+                metadata=metadata,
+            )
+
+        raise ModelInvocationFailed("all eligible model invocations failed: " + "; ".join(failures))
