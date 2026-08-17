@@ -1,3 +1,4 @@
+from .adaptive import AdaptivePolicy, PolicyMode
 from .model_executor import ModelInvocationFailed, ModelResponse, RoutedModelExecutor
 from .models import ModelProfile, ModelRegistry, NoEligibleModel
 from .policy import RoutingPolicy
@@ -18,6 +19,7 @@ from .types import (
 )
 
 __all__ = [
+    "AdaptivePolicy",
     "Budget",
     "BudgetExceeded",
     "ExecutionClass",
@@ -28,6 +30,7 @@ __all__ = [
     "ModelRegistry",
     "ModelResponse",
     "NoEligibleModel",
+    "PolicyMode",
     "Requirement",
     "Risk",
     "RouteDecision",
