@@ -68,7 +68,7 @@ class ModelRegistry:
             if profile.supports(task, execution_class)
         ]
 
-    def select(
+    def ranked(
         self,
         task: Task,
         execution_class: ExecutionClass,
@@ -76,18 +76,13 @@ class ModelRegistry:
         input_tokens: int = 0,
         output_tokens: int = 0,
         min_reliability: float = 0.0,
-    ) -> ModelProfile:
+    ) -> list[ModelProfile]:
         candidates = [
             profile
             for profile in self.eligible(task, execution_class)
             if profile.reliability >= min_reliability
         ]
-        if not candidates:
-            raise NoEligibleModel(
-                f"no eligible model for execution class {execution_class.value}"
-            )
-
-        return min(
+        return sorted(
             candidates,
             key=lambda profile: (
                 profile.estimate_cost(
@@ -98,3 +93,25 @@ class ModelRegistry:
                 profile.name,
             ),
         )
+
+    def select(
+        self,
+        task: Task,
+        execution_class: ExecutionClass,
+        *,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        min_reliability: float = 0.0,
+    ) -> ModelProfile:
+        candidates = self.ranked(
+            task,
+            execution_class,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            min_reliability=min_reliability,
+        )
+        if not candidates:
+            raise NoEligibleModel(
+                f"no eligible model for execution class {execution_class.value}"
+            )
+        return candidates[0]
