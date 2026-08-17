@@ -1,4 +1,4 @@
-from .model_executor import ModelResponse, RoutedModelExecutor
+from .model_executor import ModelInvocationFailed, ModelResponse, RoutedModelExecutor
 from .models import ModelProfile, ModelRegistry, NoEligibleModel
 from .policy import RoutingPolicy
 from .runtime import RouterRuntime
@@ -23,6 +23,7 @@ __all__ = [
     "ExecutionClass",
     "ExecutionContext",
     "ExecutionResult",
+    "ModelInvocationFailed",
     "ModelProfile",
     "ModelRegistry",
     "ModelResponse",
