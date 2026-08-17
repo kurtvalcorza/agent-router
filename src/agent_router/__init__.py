@@ -20,6 +20,8 @@ from .evaluation import (
     evaluate_gate,
     summarize_strategy,
 )
+from .evaluation_io import EvaluationIOError, load_cases, load_runs, write_runs
+from .evaluation_runner import StrategyResult, run_strategy
 from .inventory import AnthropicInventoryFetcher, OpenAIInventoryFetcher
 from .model_executor import ModelInvocationFailed, ModelResponse, RoutedModelExecutor
 from .models import ModelProfile, ModelRegistry, NoEligibleModel
@@ -73,6 +75,7 @@ __all__ = [
     "CatalogMetadata",
     "CatalogPromotionError",
     "EvaluationCase",
+    "EvaluationIOError",
     "EvaluationRun",
     "ExecutionClass",
     "ExecutionContext",
@@ -102,6 +105,7 @@ __all__ = [
     "RoutingPolicy",
     "SourceProvenance",
     "StrategyComparison",
+    "StrategyResult",
     "StrategySummary",
     "SyncResult",
     "Task",
@@ -112,11 +116,15 @@ __all__ = [
     "compare_strategies",
     "diff_catalogs",
     "evaluate_gate",
+    "load_cases",
     "load_catalog",
+    "load_runs",
     "parse_catalog",
     "promote_candidate",
     "reconcile_records",
+    "run_strategy",
     "summarize_strategy",
     "synchronize_catalog",
     "validate_promotion",
+    "write_runs",
 ]
