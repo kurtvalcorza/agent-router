@@ -7,6 +7,8 @@ from pathlib import Path
 
 from .catalog import CatalogError, load_catalog
 from .catalog_sync import diff_catalogs, synchronize_catalog
+from .evaluation import compare_strategies, evaluate_gate, summarize_strategy
+from .evaluation_io import EvaluationIOError, load_cases, load_runs
 from .inventory import AnthropicInventoryFetcher, OpenAIInventoryFetcher
 from .pricing_io import write_pricing_records
 from .pricing_sources import AnthropicPricingSource, OpenAIModelPricingSource, PricingSourceError
@@ -69,6 +71,17 @@ def build_parser() -> argparse.ArgumentParser:
     provider_fetch.add_argument("provider", choices=["openai", "anthropic"])
     provider_fetch.add_argument("--output", required=True)
 
+    evaluation = subparsers.add_parser("evaluation", help="summarize and gate benchmark results")
+    evaluation_sub = evaluation.add_subparsers(dest="evaluation_command", required=True)
+    report = evaluation_sub.add_parser("report", help="compare a strategy with a baseline")
+    report.add_argument("--cases", required=True)
+    report.add_argument("--runs", required=True)
+    report.add_argument("--strategy", default="router")
+    report.add_argument("--baseline", default="always-strong")
+    report.add_argument("--minimum-cost-savings", type=float, default=0.0)
+    report.add_argument("--maximum-quality-loss", type=float, default=0.0)
+    report.add_argument("--maximum-success-rate-loss", type=float, default=0.0)
+
     return parser
 
 
@@ -114,11 +127,7 @@ def main(argv: list[str] | None = None) -> int:
             catalog = load_catalog(args.catalog)
             inventory = load_inventory(args.inventory)
             pricing = load_pricing(args.pricing) if args.pricing else ()
-            previous = (
-                load_availability_state(args.previous_state)
-                if args.previous_state
-                else ()
-            )
+            previous = load_availability_state(args.previous_state) if args.previous_state else ()
             expected = [(profile.provider, profile.name) for profile in catalog.profiles]
             result = reconcile_records(
                 inventory,
@@ -162,10 +171,42 @@ def main(argv: list[str] | None = None) -> int:
             write_inventory(args.output, records)
             print(f"wrote {len(records)} inventory records to {args.output}")
             return 0
+
+        if args.command == "evaluation" and args.evaluation_command == "report":
+            cases = load_cases(args.cases)
+            runs = load_runs(args.runs)
+            strategy = summarize_strategy(cases, runs, strategy=args.strategy)
+            baseline = summarize_strategy(cases, runs, strategy=args.baseline)
+            comparison = compare_strategies(strategy, baseline)
+            passed, failures = evaluate_gate(
+                comparison,
+                minimum_cost_savings=args.minimum_cost_savings,
+                maximum_quality_loss=args.maximum_quality_loss,
+                maximum_success_rate_loss=args.maximum_success_rate_loss,
+            )
+            print(
+                f"{strategy.strategy}: success={strategy.success_rate:.3f} "
+                f"quality={strategy.mean_quality:.3f} cost=${strategy.total_cost_usd:.6f} "
+                f"latency={strategy.mean_latency_seconds:.3f}s "
+                f"escalation_rate={strategy.escalation_rate:.3f}"
+            )
+            print(
+                f"vs {baseline.strategy}: savings={comparison.cost_savings_fraction:.3f} "
+                f"quality_delta={comparison.quality_delta:+.3f} "
+                f"success_delta={comparison.success_rate_delta:+.3f} "
+                f"latency_delta={comparison.latency_delta_seconds:+.3f}s"
+            )
+            if not passed:
+                for failure in failures:
+                    print(f"FAIL {failure}", file=sys.stderr)
+                return 1
+            print("PASS evaluation gate")
+            return 0
     except (
         CatalogError,
         SnapshotError,
         RecordIOError,
+        EvaluationIOError,
         PricingSourceError,
         OSError,
         RuntimeError,
