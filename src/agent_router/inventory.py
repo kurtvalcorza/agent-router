@@ -10,7 +10,7 @@ from .provenance import InventoryRecord, SourceProvenance
 class OpenAIInventoryFetcher:
     client: object
     source: str = "https://api.openai.com/v1/models"
-    parser_version: str = "1"
+    parser_version: str = "openai-models-v1"
 
     @classmethod
     def from_env(cls) -> "OpenAIInventoryFetcher":
@@ -48,6 +48,54 @@ class OpenAIInventoryFetcher:
         return tuple(sorted(records, key=lambda record: record.model_id))
 
 
+@dataclass(slots=True)
+class AnthropicInventoryFetcher:
+    """Fetch Claude model identity/availability from Anthropic's Models API."""
+
+    client: object
+    source: str = "https://api.anthropic.com/v1/models"
+    parser_version: str = "anthropic-models-v1"
+
+    @classmethod
+    def from_env(cls) -> "AnthropicInventoryFetcher":
+        try:
+            from anthropic import Anthropic
+        except ImportError as exc:
+            raise RuntimeError(
+                "Anthropic inventory fetching requires the optional 'anthropic' dependency: "
+                "pip install 'agent-router[anthropic]'"
+            ) from exc
+        return cls(client=Anthropic())
+
+    def fetch(self) -> tuple[InventoryRecord, ...]:
+        response = self.client.models.list()
+        models = list(_iter_models(response))
+        payload = [_anthropic_model_payload(model) for model in models]
+        provenance = SourceProvenance.from_payload(
+            source=self.source,
+            payload=payload,
+            parser_version=self.parser_version,
+        )
+        records = [
+            InventoryRecord(
+                provider="anthropic",
+                model_id=str(_get(model, "id")),
+                available=True,
+                created_at=None,
+                owned_by="anthropic",
+                metadata={
+                    "display_name": _get(model, "display_name", None),
+                    "created_at": _get(model, "created_at", None),
+                    "type": _get(model, "type", None),
+                },
+                provenance=provenance,
+            )
+            for model in models
+            if _get(model, "id", None)
+        ]
+        return tuple(sorted(records, key=lambda record: record.model_id))
+
+
 def _iter_models(response: object) -> Iterable[object]:
     data = _get(response, "data", None)
     if data is None:
@@ -61,6 +109,15 @@ def _model_payload(model: object) -> dict[str, object]:
         "object": _get(model, "object", None),
         "created": _get(model, "created", None),
         "owned_by": _get(model, "owned_by", None),
+    }
+
+
+def _anthropic_model_payload(model: object) -> dict[str, object]:
+    return {
+        "id": _get(model, "id", None),
+        "display_name": _get(model, "display_name", None),
+        "created_at": _get(model, "created_at", None),
+        "type": _get(model, "type", None),
     }
 
 
