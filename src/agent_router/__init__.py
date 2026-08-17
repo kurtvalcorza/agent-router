@@ -2,6 +2,12 @@ from .adaptive import AdaptivePolicy, PolicyMode
 from .model_executor import ModelInvocationFailed, ModelResponse, RoutedModelExecutor
 from .models import ModelProfile, ModelRegistry, NoEligibleModel
 from .policy import RoutingPolicy
+from .providers import (
+    AnthropicMessagesAdapter,
+    OpenAIResponsesAdapter,
+    ProviderInvoker,
+    UnknownProvider,
+)
 from .runtime import RouterRuntime
 from .types import (
     Budget,
@@ -20,6 +26,7 @@ from .types import (
 
 __all__ = [
     "AdaptivePolicy",
+    "AnthropicMessagesAdapter",
     "Budget",
     "BudgetExceeded",
     "ExecutionClass",
@@ -30,7 +37,9 @@ __all__ = [
     "ModelRegistry",
     "ModelResponse",
     "NoEligibleModel",
+    "OpenAIResponsesAdapter",
     "PolicyMode",
+    "ProviderInvoker",
     "Requirement",
     "Risk",
     "RouteDecision",
@@ -39,6 +48,7 @@ __all__ = [
     "RoutingPolicy",
     "Task",
     "TelemetryEvent",
+    "UnknownProvider",
     "Verification",
     "VerificationStatus",
 ]
