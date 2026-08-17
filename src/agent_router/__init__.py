@@ -1,5 +1,16 @@
 from .adaptive import AdaptivePolicy, PolicyMode
 from .catalog import CatalogError, CatalogMetadata, ModelCatalog, load_catalog, parse_catalog
+from .catalog_sync import (
+    CatalogChange,
+    CatalogDiff,
+    CatalogPromotionError,
+    ProviderModelSnapshot,
+    SyncResult,
+    diff_catalogs,
+    promote_candidate,
+    synchronize_catalog,
+    validate_promotion,
+)
 from .model_executor import ModelInvocationFailed, ModelResponse, RoutedModelExecutor
 from .models import ModelProfile, ModelRegistry, NoEligibleModel
 from .policy import RoutingPolicy
@@ -30,8 +41,11 @@ __all__ = [
     "AnthropicMessagesAdapter",
     "Budget",
     "BudgetExceeded",
+    "CatalogChange",
+    "CatalogDiff",
     "CatalogError",
     "CatalogMetadata",
+    "CatalogPromotionError",
     "ExecutionClass",
     "ExecutionContext",
     "ExecutionResult",
@@ -44,17 +58,23 @@ __all__ = [
     "OpenAIResponsesAdapter",
     "PolicyMode",
     "ProviderInvoker",
+    "ProviderModelSnapshot",
     "Requirement",
     "Risk",
     "RouteDecision",
     "RoutedModelExecutor",
     "RouterRuntime",
     "RoutingPolicy",
+    "SyncResult",
     "Task",
     "TelemetryEvent",
     "UnknownProvider",
     "Verification",
     "VerificationStatus",
+    "diff_catalogs",
     "load_catalog",
     "parse_catalog",
+    "promote_candidate",
+    "synchronize_catalog",
+    "validate_promotion",
 ]
