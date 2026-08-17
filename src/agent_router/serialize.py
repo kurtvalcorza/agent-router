@@ -7,10 +7,7 @@ from .catalog import ModelCatalog
 
 
 def catalog_to_dict(catalog: ModelCatalog) -> dict[str, object]:
-    result: dict[str, object] = {
-        "version": catalog.metadata.version,
-        "models": [],
-    }
+    result: dict[str, object] = {"version": catalog.metadata.version, "models": []}
     if catalog.metadata.pricing_as_of is not None:
         result["pricing_as_of"] = catalog.metadata.pricing_as_of
     if catalog.metadata.pricing_source is not None:
@@ -22,16 +19,28 @@ def catalog_to_dict(catalog: ModelCatalog) -> dict[str, object]:
 
     models: list[dict[str, object]] = []
     for profile in catalog.profiles:
+        pricing = profile.pricing_profile
+        pricing_data: dict[str, object] = {
+            "input_per_million": pricing.standard_input,
+            "output_per_million": pricing.standard_output,
+        }
+        optional = {
+            "cached_input_per_million": pricing.cached_input,
+            "cache_write_per_million": pricing.cache_write,
+            "batch_input_per_million": pricing.batch_input,
+            "batch_output_per_million": pricing.batch_output,
+            "long_context_input_per_million": pricing.long_context_input,
+            "long_context_output_per_million": pricing.long_context_output,
+            "long_context_threshold": pricing.long_context_threshold,
+        }
+        pricing_data.update({key: value for key, value in optional.items() if value is not None})
         item: dict[str, object] = {
             "name": profile.name,
             "provider": profile.provider,
             "execution_classes": sorted(value.value for value in profile.execution_classes),
             "capabilities": sorted(value.value for value in profile.capabilities),
             "reliability": profile.reliability,
-            "pricing": {
-                "input_per_million": profile.input_cost_per_million,
-                "output_per_million": profile.output_cost_per_million,
-            },
+            "pricing": pricing_data,
         }
         if profile.context_window is not None:
             item["context_window"] = profile.context_window
