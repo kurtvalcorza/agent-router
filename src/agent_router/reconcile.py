@@ -36,6 +36,7 @@ def reconcile_records(
     pricing: Iterable[PricingRecord] = (),
     *,
     previous: Iterable[AvailabilityObservation] = (),
+    expected_models: Iterable[tuple[str, str]] = (),
     missing_threshold: int = 2,
 ) -> ReconciliationResult:
     if missing_threshold < 1:
@@ -44,7 +45,12 @@ def reconcile_records(
     inventory_by_key = {(item.provider, item.model_id): item for item in inventory}
     pricing_by_key = {(item.provider, item.model_id): item for item in pricing}
     previous_by_key = {(item.provider, item.model): item for item in previous}
-    keys = set(previous_by_key) | set(inventory_by_key) | set(pricing_by_key)
+    keys = (
+        set(previous_by_key)
+        | set(inventory_by_key)
+        | set(pricing_by_key)
+        | set(expected_models)
+    )
 
     observations: list[AvailabilityObservation] = []
     snapshots: list[ProviderModelSnapshot] = []
@@ -58,7 +64,7 @@ def reconcile_records(
         if inv is not None and inv.available:
             status = AvailabilityStatus.AVAILABLE
             missing_count = 0
-            last_seen = inv.provenance.retrieved_at
+            last_seen = inv.provenance.retrieved_at if inv.provenance else None
         else:
             missing_count = (prior.consecutive_missing if prior else 0) + 1
             status = (
@@ -77,10 +83,11 @@ def reconcile_records(
         metadata: dict[str, object] = {}
         if inv is not None:
             metadata["inventory"] = dict(inv.metadata)
-            metadata["inventory_provenance"] = _provenance_dict(inv.provenance)
+            if inv.provenance is not None:
+                metadata["inventory_provenance"] = _provenance_dict(inv.provenance)
 
         price = pricing_by_key.get(key)
-        if price is not None:
+        if price is not None and price.provenance is not None:
             metadata["pricing_provenance"] = _provenance_dict(price.provenance)
 
         observations.append(
