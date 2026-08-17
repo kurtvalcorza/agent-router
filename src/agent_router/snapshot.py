@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterable, Protocol
 
 from .catalog_sync import ProviderModelSnapshot
+from .pricing import PricingProfile
 
 
 class SnapshotFetcher(Protocol):
@@ -42,6 +43,7 @@ def load_snapshots(path: str | Path) -> tuple[ProviderModelSnapshot, ...]:
                     output_cost_per_million=_optional_non_negative_number(
                         item.get("output_cost_per_million"), index, "output_cost_per_million"
                     ),
+                    pricing=_pricing(item.get("pricing"), index),
                     metadata=_metadata(item.get("metadata", {}), index),
                 )
             )
@@ -71,16 +73,23 @@ def _optional_positive_int(value: object, index: int) -> int | None:
     return value
 
 
-def _optional_non_negative_number(
-    value: object, index: int, field_name: str
-) -> float | None:
+def _optional_non_negative_number(value: object, index: int, field_name: str) -> float | None:
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
-        raise SnapshotError(
-            f"snapshots[{index}].{field_name} must be a non-negative number"
-        )
+        raise SnapshotError(f"snapshots[{index}].{field_name} must be a non-negative number")
     return float(value)
+
+
+def _pricing(value: object, index: int) -> PricingProfile | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise SnapshotError(f"snapshots[{index}].pricing must be an object")
+    try:
+        return PricingProfile(**value)
+    except TypeError as exc:
+        raise SnapshotError(f"snapshots[{index}].pricing contains unsupported fields") from exc
 
 
 def _metadata(value: object, index: int) -> dict[str, object]:
