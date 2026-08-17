@@ -131,7 +131,7 @@ Pricing adapters preserve source provenance and fail closed when expected author
 
 `benchmarks/cases.example.json` shows the benchmark case convention. Each case declares its task payload, routing requirements, risk, expected output, token estimates, and grader inside `metadata`. The harness compiles that deterministically into a real `Task`.
 
-Install provider extras and run all three strategies against the same corpus:
+Install provider extras and run the static router plus fixed baselines against the same corpus:
 
 ```bash
 agent-router-benchmark \
@@ -143,15 +143,16 @@ agent-router-benchmark \
   --output benchmarks/runs.json
 ```
 
-The runner executes:
+The runner supports:
 
-- `router` — the actual policy + capability + cost router
+- `router` — the policy + capability + static reliability + cost router
+- `empirical-router` — the benchmark-trained success-probability + expected-cost router
 - `always-cheap` — a fixed low-cost catalog model or alias
 - `always-strong` — a fixed high-capability catalog model or alias
 
 Built-in deterministic graders currently include `exact_match`, `text_exact`, and `contains_all`. Grading is provider-neutral and can also be replaced programmatically.
 
-Then gate the router against the strong baseline:
+Then gate a strategy against the strong baseline:
 
 ```bash
 agent-router evaluation report \
@@ -165,6 +166,40 @@ agent-router evaluation report \
 ```
 
 This reports success rate, mean quality, total cost, latency, escalation rate, and deltas against the selected baseline. A failed acceptance gate returns a non-zero exit status so the benchmark can be used in CI.
+
+## Empirical routing
+
+Fit the empirical model from a **historical/training corpus**, not from the evaluation corpus you intend to use for comparison:
+
+```bash
+agent-router evaluation train-empirical \
+  --cases benchmarks/train-cases.json \
+  --runs benchmarks/train-runs.json \
+  --output .agent-router/empirical-router.json
+```
+
+The model estimates `P(success | task features, model)` using hierarchical Beta smoothing. Task features currently include task kind, risk, and declared requirements. Sparse task/model combinations shrink toward the model's global observed success rate instead of producing brittle 0% or 100% estimates.
+
+Run the held-out corpus with the trained empirical router:
+
+```bash
+agent-router-benchmark \
+  --cases benchmarks/eval-cases.json \
+  --catalog config/models.yaml \
+  --cheap fast \
+  --strong strong \
+  --empirical-model .agent-router/empirical-router.json \
+  --strategies empirical-router always-cheap always-strong \
+  --output benchmarks/empirical-runs.json
+```
+
+The empirical selector first enforces capability, execution-class, reliability-floor, and budget constraints. It then ranks eligible models by expected total cost:
+
+```text
+expected_total_cost = call_cost + P(failure) × recovery_cost
+```
+
+`--recovery-cost-multiplier` can tune how aggressively the router penalizes likely recovery/escalation work. The selected model, empirical success probability, feature key, and expected total cost are retained in result metadata for auditability.
 
 ## Provider adapters
 
@@ -230,8 +265,12 @@ executor = RoutedModelExecutor(
 - runnable benchmark corpus and task compilation
 - live router / always-cheap / always-strong benchmark execution
 - persisted evaluation runs and CI-compatible acceptance gates
+- persisted empirical success model trained from benchmark history
+- hierarchical task/model success estimation
+- expected-total-cost empirical model selection
+- live empirical-router benchmark strategy
 
-The main remaining v0.1 work is empirical routing from benchmark/telemetry history plus production hardening and observability.
+The main remaining v0.1 work is production hardening: telemetry persistence/export, provider health and circuit breaking, caching, concurrency/rate-limit handling, and release polish.
 
 ## Development
 
