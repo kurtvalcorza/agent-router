@@ -7,13 +7,9 @@ from .benchmark_runtime import execute_task_strategy, fixed_model_executor
 from .catalog import ModelCatalog
 from .evaluation import EvaluationCase, EvaluationRun
 from .model_executor import RoutedModelExecutor
-from .providers import (
-    AnthropicMessagesAdapter,
-    OpenAIResponsesAdapter,
-    ProviderInvoker,
-)
+from .providers import AnthropicMessagesAdapter, OpenAIResponsesAdapter, ProviderInvoker
 from .runtime import RouterRuntime
-from .types import ExecutionClass, ExecutionResult, TelemetryEvent
+from .types import ExecutionClass, TelemetryEvent
 
 
 def provider_invoker_from_catalog(catalog: ModelCatalog) -> ProviderInvoker:
@@ -66,17 +62,27 @@ def run_router_strategy(
     def execute_task(task):
         events: list[TelemetryEvent] = []
         runtime = RouterRuntime(telemetry=events.append, max_attempts=4)
+        initial_class = runtime.policy.route(task).execution_class
         runtime.register_executor(ExecutionClass.LIGHT_REASONING, model_executor)
         runtime.register_executor(ExecutionClass.DEEP_REASONING, model_executor)
         result = runtime.execute(task)
-        escalations = max(0, len(events) - 1)
-        if events:
-            first = events[0].execution_class
-            last = events[-1].execution_class
-            escalations = int(first != last) + max(0, len(events) - 1)
+        terminal_class = events[-1].execution_class if events else initial_class
+        escalation_rank = {
+            ExecutionClass.DETERMINISTIC: 0,
+            ExecutionClass.RETRIEVAL: 0,
+            ExecutionClass.LIGHT_REASONING: 1,
+            ExecutionClass.DEEP_REASONING: 2,
+            ExecutionClass.HUMAN_REVIEW: 3,
+        }
+        escalations = max(
+            0,
+            escalation_rank[terminal_class] - escalation_rank[initial_class],
+        )
         metadata = dict(result.metadata)
         metadata["escalations"] = escalations
         metadata["policy_mode"] = mode.value
+        metadata["initial_execution_class"] = initial_class.value
+        metadata["terminal_execution_class"] = terminal_class.value
         return replace(result, metadata=metadata)
 
     return execute_task_strategy(
