@@ -54,12 +54,20 @@ class NoEligibleModel(RuntimeError):
 class ModelRegistry:
     def __init__(self, profiles: Iterable[ModelProfile] = ()) -> None:
         self._profiles: dict[str, ModelProfile] = {profile.name: profile for profile in profiles}
+        self._aliases: dict[str, str] = {}
 
     def register(self, profile: ModelProfile) -> None:
         self._profiles[profile.name] = profile
 
+    def register_alias(self, alias: str, target: str) -> None:
+        if alias in self._profiles:
+            raise ValueError(f"alias {alias!r} conflicts with a model name")
+        if target not in self._profiles:
+            raise KeyError(target)
+        self._aliases[alias] = target
+
     def get(self, name: str) -> ModelProfile:
-        return self._profiles[name]
+        return self._profiles[self._aliases.get(name, name)]
 
     def eligible(self, task: Task, execution_class: ExecutionClass) -> list[ModelProfile]:
         return [
