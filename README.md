@@ -110,30 +110,61 @@ agent-router catalog sync config/models.yaml snapshots.json \
 
 `catalog sync` never overwrites the pinned source catalog. It writes a candidate file, prints warnings for unmanaged or missing provider models, and prints the structured diff for review.
 
-### Anthropic pricing fetch
-
-Anthropic pricing is parsed from the official pricing page into normalized `PricingRecord` JSON. Display-name-to-model-ID mapping is explicit and reviewable; the parser does not infer API model IDs from marketing names.
+### Provider inventory and pricing
 
 ```bash
+agent-router provider fetch openai --output .agent-router/openai-inventory.json
+agent-router provider fetch anthropic --output .agent-router/anthropic-inventory.json
+
 agent-router pricing fetch anthropic \
   --model-map config/anthropic-model-map.example.json \
   --output .agent-router/anthropic-pricing.json
+
+agent-router pricing fetch openai \
+  --model-map config/openai-model-map.example.json \
+  --output .agent-router/openai-pricing.json
 ```
 
-The model map may also declare reviewed long-context thresholds:
+Pricing adapters preserve source provenance and fail closed when expected authoritative source structures change. Model identity mappings and special long-context thresholds remain explicit reviewed configuration.
 
-```json
-{
-  "models": {
-    "Claude Sonnet 4": "claude-sonnet-4-20250514"
-  },
-  "long_context_thresholds": {
-    "Claude Sonnet 4": 200000
-  }
-}
+## Benchmark execution and evaluation
+
+`benchmarks/cases.example.json` shows the benchmark case convention. Each case declares its task payload, routing requirements, risk, expected output, token estimates, and grader inside `metadata`. The harness compiles that deterministically into a real `Task`.
+
+Install provider extras and run all three strategies against the same corpus:
+
+```bash
+agent-router-benchmark \
+  --cases benchmarks/cases.example.json \
+  --catalog config/models.yaml \
+  --cheap fast \
+  --strong strong \
+  --mode balanced \
+  --output benchmarks/runs.json
 ```
 
-When a reviewed threshold is declared, the pricing parser requires the official long-context pricing table and records its premium input/output rates in the `PricingProfile`. If the expected source structure is missing or changes, the fetch fails closed rather than guessing.
+The runner executes:
+
+- `router` — the actual policy + capability + cost router
+- `always-cheap` — a fixed low-cost catalog model or alias
+- `always-strong` — a fixed high-capability catalog model or alias
+
+Built-in deterministic graders currently include `exact_match`, `text_exact`, and `contains_all`. Grading is provider-neutral and can also be replaced programmatically.
+
+Then gate the router against the strong baseline:
+
+```bash
+agent-router evaluation report \
+  --cases benchmarks/cases.example.json \
+  --runs benchmarks/runs.json \
+  --strategy router \
+  --baseline always-strong \
+  --minimum-cost-savings 0.30 \
+  --maximum-quality-loss 0.05 \
+  --maximum-success-rate-loss 0.00
+```
+
+This reports success rate, mean quality, total cost, latency, escalation rate, and deltas against the selected baseline. A failed acceptance gate returns a non-zero exit status so the benchmark can be used in CI.
 
 ## Provider adapters
 
@@ -193,12 +224,14 @@ executor = RoutedModelExecutor(
 - dated pricing metadata and source provenance fields
 - candidate catalog synchronization and structured diffs
 - guarded catalog promotion that preserves locally reviewed policy
-- OpenAI model inventory fetcher with provenance
+- OpenAI and Anthropic model inventory fetchers
 - availability reconciliation with repeated-miss confirmation
-- Anthropic authoritative pricing parser with long-context rules
-- operational catalog and Anthropic pricing CLI commands
+- OpenAI and Anthropic authoritative pricing ingestion
+- runnable benchmark corpus and task compilation
+- live router / always-cheap / always-strong benchmark execution
+- persisted evaluation runs and CI-compatible acceptance gates
 
-Learned routing and additional live provider pricing/inventory adapters remain outside the core package.
+The main remaining v0.1 work is empirical routing from benchmark/telemetry history plus production hardening and observability.
 
 ## Development
 
