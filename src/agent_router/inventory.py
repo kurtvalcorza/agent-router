@@ -84,9 +84,9 @@ class AnthropicInventoryFetcher:
                 created_at=None,
                 owned_by="anthropic",
                 metadata={
-                    "display_name": _get(model, "display_name", None),
-                    "created_at": _get(model, "created_at", None),
-                    "type": _get(model, "type", None),
+                    "display_name": _optional_str(_get(model, "display_name", None)),
+                    "created_at": _stringify(_get(model, "created_at", None)),
+                    "type": _optional_str(_get(model, "type", None)),
                 },
                 provenance=provenance,
             )
@@ -116,7 +116,7 @@ def _anthropic_model_payload(model: object) -> dict[str, object]:
     return {
         "id": _get(model, "id", None),
         "display_name": _get(model, "display_name", None),
-        "created_at": _get(model, "created_at", None),
+        "created_at": _stringify(_get(model, "created_at", None)),
         "type": _get(model, "type", None),
     }
 
@@ -133,3 +133,9 @@ def _optional_int(value: object) -> int | None:
 
 def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _stringify(value: object) -> str | None:
+    if value is None:
+        return None
+    return value if isinstance(value, str) else str(value)
