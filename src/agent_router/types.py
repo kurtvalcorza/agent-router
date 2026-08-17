@@ -65,7 +65,13 @@ class Budget:
     model_calls: int = 0
     tool_calls: int = 0
 
-    def consume(self, *, cost_usd: float = 0.0, model_calls: int = 0, tool_calls: int = 0) -> None:
+    def consume(
+        self,
+        *,
+        cost_usd: float = 0.0,
+        model_calls: int = 0,
+        tool_calls: int = 0,
+    ) -> None:
         next_cost = self.cost_usd + cost_usd
         next_model_calls = self.model_calls + model_calls
         next_tool_calls = self.tool_calls + tool_calls
