@@ -106,21 +106,22 @@ catalog = promote_candidate(catalog, sync.candidate)
 
 Synchronization intentionally updates only operational provider facts: context windows, pricing, and provider snapshot metadata. Newly discovered models are reported but not auto-added because they have no reviewed capability or reliability policy. Promotion rejects changes to model membership, aliases, provider ownership, execution classes, capabilities, or reliability.
 
-This enables a safe refresh flow:
+## CLI
 
-```text
-provider metadata
-      ↓
-normalized snapshots
-      ↓
-candidate catalog
-      ↓
-diff + warnings
-      ↓
-validation gate
-      ↓
-explicit promotion
+Installing the package exposes an `agent-router` command for catalog operations:
+
+```bash
+agent-router catalog check config/models.yaml
+agent-router catalog diff config/models.yaml config/models.candidate.yaml
+agent-router catalog sync config/models.yaml snapshots.json \
+  --output config/models.candidate.yaml \
+  --pricing-as-of 2026-08-17 \
+  --pricing-source provider-pricing-page
 ```
+
+`catalog sync` never overwrites the pinned source catalog. It writes a candidate file, prints warnings for unmanaged or missing provider models, and prints the structured diff for review.
+
+Provider fetchers implement a small `SnapshotFetcher` protocol and normalize upstream data into `ProviderModelSnapshot` records. Snapshot files use a provider-neutral JSON format, which keeps fetching credentials and provider-specific parsing separate from catalog review and promotion.
 
 ## Provider adapters
 
@@ -182,8 +183,10 @@ For custom task shapes, inject a `prompt_builder: Callable[[Task], str]` rather 
 - dated pricing metadata and source provenance fields
 - candidate catalog synchronization and structured diffs
 - guarded catalog promotion that preserves locally reviewed policy
+- provider-neutral snapshot IO and fetcher protocol
+- operational `catalog check`, `catalog diff`, and `catalog sync` CLI commands
 
-Learned routing and live provider metadata fetchers remain outside the core package.
+Learned routing and concrete live provider metadata fetchers remain outside the core package.
 
 ## Development
 
