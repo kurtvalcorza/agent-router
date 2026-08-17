@@ -1,0 +1,38 @@
+[
+  {
+    "id": "semantic-short-1",
+    "task_kind": "qa",
+    "minimum_quality": 1.0,
+    "metadata": {
+      "payload": {
+        "prompt": "Reply with exactly: Paris"
+      },
+      "requirements": ["semantic_reasoning"],
+      "risk": "low",
+      "task_metadata": {
+        "estimated_input_tokens": 20,
+        "estimated_output_tokens": 5
+      },
+      "grader": "text_exact",
+      "expected": "Paris"
+    }
+  },
+  {
+    "id": "deep-reasoning-keywords-1",
+    "task_kind": "analysis",
+    "minimum_quality": 1.0,
+    "metadata": {
+      "payload": {
+        "prompt": "Explain why correlation alone does not establish causation. Include the terms confounding and temporal ordering."
+      },
+      "requirements": ["semantic_reasoning", "deep_planning", "high_reliability"],
+      "risk": "medium",
+      "task_metadata": {
+        "estimated_input_tokens": 40,
+        "estimated_output_tokens": 120
+      },
+      "grader": "contains_all",
+      "expected": ["confounding", "temporal ordering"]
+    }
+  }
+]
