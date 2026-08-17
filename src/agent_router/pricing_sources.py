@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
+from dataclasses import replace
 from html.parser import HTMLParser
 from urllib.request import Request, urlopen
 
@@ -56,32 +58,37 @@ def _default_fetch_text(url: str) -> str:
 
 def _usd_per_mtok(value: str) -> float:
     cleaned = value.replace(",", "")
-    marker = "$"
-    if marker not in cleaned:
+    if "$" not in cleaned:
         raise PricingSourceError(f"expected USD/MTok price, got {value!r}")
-    number = cleaned.split(marker, 1)[1].split("/", 1)[0].strip()
+    number = cleaned.split("$", 1)[1].split("/", 1)[0].strip()
     try:
         return float(number)
     except ValueError as exc:
         raise PricingSourceError(f"invalid price {value!r}") from exc
 
 
-class AnthropicPricingSource:
-    """Parse Anthropic's official pricing table with explicit display-name mapping.
+def _input_output_rates(value: str) -> tuple[float, float]:
+    matches = re.findall(r"(Input|Output)\s*:\s*\$([0-9.]+)\s*/\s*MTok", value)
+    rates = {kind.lower(): float(amount) for kind, amount in matches}
+    if "input" not in rates or "output" not in rates:
+        raise PricingSourceError(f"expected input/output long-context rates, got {value!r}")
+    return rates["input"], rates["output"]
 
-    The source adapter intentionally does not guess API model IDs from marketing names.
-    Callers provide a reviewed mapping from pricing-page display names to catalog IDs.
-    """
+
+class AnthropicPricingSource:
+    """Parse Anthropic's official pricing page using reviewed model mappings."""
 
     def __init__(
         self,
         model_ids: dict[str, str],
         *,
+        long_context_thresholds: dict[str, int] | None = None,
         url: str = ANTHROPIC_PRICING_URL,
         fetch_text: Callable[[str], str] = _default_fetch_text,
-        parser_version: str = "anthropic-html-v1",
+        parser_version: str = "anthropic-html-v2",
     ) -> None:
         self.model_ids = dict(model_ids)
+        self.long_context_thresholds = dict(long_context_thresholds or {})
         self.url = url
         self.fetch_text = fetch_text
         self.parser_version = parser_version
@@ -99,11 +106,13 @@ class AnthropicPricingSource:
             required={"Model", "Batch input", "Batch output"},
             required_table=False,
         )
+        long_context = self._find_long_context_table(parser.tables)
+        long_rates = self._parse_long_context_table(long_context) if long_context is not None else None
         batch_rows = self._rows_by_model(batch) if batch is not None else {}
         base_rows = self._rows_by_model(base)
-        provenance = SourceProvenance.from_text(
+        provenance = SourceProvenance.from_payload(
             source=self.url,
-            text=text,
+            payload=text,
             parser_version=self.parser_version,
         )
 
@@ -127,6 +136,21 @@ class AnthropicPricingSource:
                 if batch_row is not None
                 else None,
             )
+
+            threshold = self.long_context_thresholds.get(display_name)
+            if threshold is not None:
+                if long_rates is None:
+                    raise PricingSourceError(
+                        f"long-context pricing requested for {display_name!r}, but rule table was not found"
+                    )
+                long_input, long_output = long_rates
+                pricing = replace(
+                    pricing,
+                    long_context_input=long_input,
+                    long_context_output=long_output,
+                    long_context_threshold=threshold,
+                )
+
             records.append(
                 PricingRecord(
                     provider="anthropic",
@@ -151,6 +175,26 @@ class AnthropicPricingSource:
         if required_table:
             raise PricingSourceError(f"pricing table missing expected columns: {sorted(required)!r}")
         return None
+
+    @staticmethod
+    def _find_long_context_table(tables: list[list[list[str]]]) -> list[list[str]] | None:
+        for table in tables:
+            if not table or len(table[0]) != 2:
+                continue
+            left, right = table[0]
+            if "200K input tokens" in left and "200K input tokens" in right:
+                return table
+        return None
+
+    @staticmethod
+    def _parse_long_context_table(table: list[list[str]]) -> tuple[float, float]:
+        if len(table) < 2 or len(table[1]) != 2:
+            raise PricingSourceError("long-context pricing table has unexpected shape")
+        standard_input, standard_output = _input_output_rates(table[1][0])
+        premium_input, premium_output = _input_output_rates(table[1][1])
+        if premium_input < standard_input or premium_output < standard_output:
+            raise PricingSourceError("long-context premium rates must not be below standard rates")
+        return premium_input, premium_output
 
     @staticmethod
     def _rows_by_model(table: list[list[str]] | None) -> dict[str, dict[str, str]]:
