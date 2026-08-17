@@ -11,9 +11,12 @@ from .catalog_sync import (
     synchronize_catalog,
     validate_promotion,
 )
+from .inventory import OpenAIInventoryFetcher
 from .model_executor import ModelInvocationFailed, ModelResponse, RoutedModelExecutor
 from .models import ModelProfile, ModelRegistry, NoEligibleModel
 from .policy import RoutingPolicy
+from .pricing import PricingProfile
+from .provenance import InventoryRecord, PricingRecord, SourceProvenance
 from .providers import (
     AnthropicMessagesAdapter,
     OpenAIResponsesAdapter,
@@ -49,14 +52,18 @@ __all__ = [
     "ExecutionClass",
     "ExecutionContext",
     "ExecutionResult",
+    "InventoryRecord",
     "ModelCatalog",
     "ModelInvocationFailed",
     "ModelProfile",
     "ModelRegistry",
     "ModelResponse",
     "NoEligibleModel",
+    "OpenAIInventoryFetcher",
     "OpenAIResponsesAdapter",
     "PolicyMode",
+    "PricingProfile",
+    "PricingRecord",
     "ProviderInvoker",
     "ProviderModelSnapshot",
     "Requirement",
@@ -65,6 +72,7 @@ __all__ = [
     "RoutedModelExecutor",
     "RouterRuntime",
     "RoutingPolicy",
+    "SourceProvenance",
     "SyncResult",
     "Task",
     "TelemetryEvent",
