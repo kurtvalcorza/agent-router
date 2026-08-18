@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from .adaptive import AdaptivePolicy
 from .models import ModelRegistry, NoEligibleModel
-from .types import ExecutionContext, ExecutionResult, Task
+from .types import BudgetExceeded, ExecutionContext, ExecutionResult, Task
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +35,18 @@ class ModelInvocationFailed(RuntimeError):
 
 class UnknownProvider(KeyError):
     """Raised when no adapter is registered for a routed model's provider."""
+
+
+def _remaining_model_calls(context: ExecutionContext) -> int | None:
+    """Model-call allowance left in the budget, or ``None`` when uncapped.
+
+    Used to bound the executor's provider-fallback loop so a single executor invocation
+    cannot exceed ``max_model_calls`` by attempting many candidates before one succeeds.
+    """
+    budget = context.budget
+    if budget.max_model_calls is None:
+        return None
+    return max(budget.max_model_calls - budget.model_calls, 0)
 
 
 class RoutedModelExecutor:
@@ -83,8 +95,15 @@ class RoutedModelExecutor:
                 f"{context.decision.execution_class.value}"
             )
 
+        remaining_model_calls = _remaining_model_calls(context)
+
         failures: list[str] = []
         for profile in candidates:
+            if remaining_model_calls is not None and len(failures) >= remaining_model_calls:
+                # Each attempt (success or failure) is one real provider call. Stop the
+                # fallback fan-out before it exceeds the model-call budget, instead of
+                # letting runtime's post-call accounting catch the overspend afterward.
+                raise BudgetExceeded("model-call budget exhausted during provider fallback")
             try:
                 response = self.invoke(profile.provider, profile.name, task)
             except UnknownProvider:

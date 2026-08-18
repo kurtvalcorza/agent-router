@@ -9,9 +9,10 @@ from .model_executor import (
     ModelInvoker,
     TokenEstimator,
     UnknownProvider,
+    _remaining_model_calls,
     default_token_estimator,
 )
-from .types import ExecutionContext, ExecutionResult, Task
+from .types import BudgetExceeded, ExecutionContext, ExecutionResult, Task
 
 
 @dataclass(slots=True)
@@ -49,8 +50,13 @@ class EmpiricalRoutedModelExecutor:
         if not candidates:
             raise ModelInvocationFailed("no empirical candidate satisfies routing constraints")
 
+        remaining_model_calls = _remaining_model_calls(context)
+
         failures: list[str] = []
         for candidate in candidates:
+            if remaining_model_calls is not None and len(failures) >= remaining_model_calls:
+                # Bound the fallback fan-out to the model-call budget (see RoutedModelExecutor).
+                raise BudgetExceeded("model-call budget exhausted during provider fallback")
             profile = candidate.profile
             try:
                 response = self.invoke(profile.provider, profile.name, task)
