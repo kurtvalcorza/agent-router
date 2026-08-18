@@ -3,7 +3,6 @@ from pathlib import Path
 
 from agent_router.cli import main
 
-
 CATALOG = {
     "version": "1",
     "pricing_as_of": "2026-08-01",
@@ -87,6 +86,38 @@ def test_catalog_sync_writes_candidate_not_source(tmp_path) -> None:
     assert code == 0
     assert source.read_text(encoding="utf-8") == original
     assert candidate.exists()
+
+
+def test_catalog_reconcile_writes_state_and_snapshots(tmp_path) -> None:
+    # Regression: the CLI passed ``expected=`` while the function accepts ``expected_models=``,
+    # so this command raised TypeError on every invocation and had zero test coverage.
+    catalog = tmp_path / "models.json"
+    inventory = tmp_path / "inventory.json"
+    state_out = tmp_path / "state.json"
+    snaps_out = tmp_path / "snapshots.json"
+    _write_json(catalog, CATALOG)
+    _write_json(
+        inventory,
+        [{"provider": "openai", "model_id": "small-model", "available": True}],
+    )
+
+    code = main(
+        [
+            "catalog",
+            "reconcile",
+            str(catalog),
+            "--inventory",
+            str(inventory),
+            "--state-output",
+            str(state_out),
+            "--snapshots-output",
+            str(snaps_out),
+        ]
+    )
+
+    assert code == 0
+    assert state_out.exists()
+    assert snaps_out.exists()
 
 
 def test_catalog_sync_refuses_overwrite(tmp_path, capsys) -> None:

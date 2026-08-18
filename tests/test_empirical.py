@@ -1,3 +1,5 @@
+import pytest
+
 from agent_router.benchmark_runtime import case_to_task
 from agent_router.empirical import EmpiricalSelector, EmpiricalSuccessModel
 from agent_router.evaluation import EvaluationCase, EvaluationRun
@@ -123,3 +125,18 @@ def test_unseen_model_uses_non_extreme_prior():
     model = EmpiricalSuccessModel.fit([case("a")], [run("a", "cheap", True)])
     estimate = model.estimate("unseen", case_to_task(case("x")))
     assert 0.0 < estimate.probability < 1.0
+
+
+def test_sparse_feature_shrinks_toward_model_global_rate_not_half():
+    # Regression: adding the raw prior on top of the hierarchical pseudo-counts biased a
+    # sparse-feature estimate toward 0.5 instead of the model's global observed rate.
+    light_cases = [case(f"l{i}") for i in range(20)]
+    runs = [run(f"l{i}", "cheap", success=(i > 0)) for i in range(20)]  # 19/20 global
+    model = EmpiricalSuccessModel.fit(light_cases, runs)
+
+    global_rate = (model.prior_alpha + 19) / (model.prior_alpha + model.prior_beta + 20)
+    unseen_deep = model.estimate("cheap", case_to_task(case("d", deep=True)))
+
+    assert unseen_deep.trials == 0
+    assert unseen_deep.probability == pytest.approx(global_rate)
+    assert unseen_deep.probability > 0.9

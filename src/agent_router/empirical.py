@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from .benchmark_runtime import case_to_task
 from .evaluation import EvaluationCase, EvaluationRun
@@ -55,7 +55,7 @@ class EmpiricalSuccessModel:
         prior_alpha: float = 1.0,
         prior_beta: float = 1.0,
         feature_weight: float = 3.0,
-    ) -> "EmpiricalSuccessModel":
+    ) -> EmpiricalSuccessModel:
         model = cls(
             prior_alpha=prior_alpha,
             prior_beta=prior_beta,
@@ -99,13 +99,14 @@ class EmpiricalSuccessModel:
         )
 
         successes, trials = self._feature.get((model, feature_key), (0, 0))
-        alpha = self.prior_alpha + self.feature_weight * global_probability + successes
-        beta = (
-            self.prior_beta
-            + self.feature_weight * (1.0 - global_probability)
-            + (trials - successes)
-        )
-        probability = alpha / (alpha + beta)
+        # Hierarchical Beta: the feature prior is the model's global rate, expressed as
+        # ``feature_weight`` pseudo-observations. The raw prior is NOT re-added here — it is
+        # already folded into ``global_probability`` above. With no feature data the estimate
+        # equals ``global_probability`` (shrink toward the global rate), not 0.5.
+        alpha = self.feature_weight * global_probability + successes
+        beta = self.feature_weight * (1.0 - global_probability) + (trials - successes)
+        denominator = alpha + beta
+        probability = alpha / denominator if denominator > 0 else global_probability
         return SuccessEstimate(
             model=model,
             feature_key=feature_key,

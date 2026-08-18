@@ -26,22 +26,24 @@ class RoutingPolicy:
                 "task requires exact computation",
             )
 
+        needs_deep_reasoning = (
+            task.risk is Risk.HIGH
+            or Requirement.DEEP_PLANNING in requirements
+            or Requirement.HIGH_RELIABILITY in requirements
+            or Requirement.LONG_CONTEXT in requirements
+        )
+
         if (
             Requirement.EXTERNAL_DATA in requirements
             and Requirement.SEMANTIC_REASONING not in requirements
-            and Requirement.DEEP_PLANNING not in requirements
+            and not needs_deep_reasoning
         ):
             return RouteDecision(
                 ExecutionClass.RETRIEVAL,
                 "external data can be retrieved without semantic reasoning",
             )
 
-        if (
-            task.risk is Risk.HIGH
-            or Requirement.DEEP_PLANNING in requirements
-            or Requirement.HIGH_RELIABILITY in requirements
-            or Requirement.LONG_CONTEXT in requirements
-        ):
+        if needs_deep_reasoning:
             return RouteDecision(
                 ExecutionClass.DEEP_REASONING,
                 "task requires high-capability reasoning",

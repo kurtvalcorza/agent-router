@@ -20,7 +20,11 @@ def provenance(source: str = "test") -> SourceProvenance:
 
 def test_present_model_is_available_and_resets_missing_count():
     result = reconcile_records(
-        [InventoryRecord(provider="openai", model_id="m1", available=True, provenance=provenance())],
+        [
+            InventoryRecord(
+                provider="openai", model_id="m1", available=True, provenance=provenance()
+            )
+        ],
         previous=[
             AvailabilityObservation(
                 provider="openai",
@@ -38,7 +42,11 @@ def test_present_model_is_available_and_resets_missing_count():
 def test_single_absence_is_only_suspect():
     result = reconcile_records(
         [],
-        previous=[AvailabilityObservation(provider="openai", model="m1", status=AvailabilityStatus.AVAILABLE)],
+        previous=[
+            AvailabilityObservation(
+                provider="openai", model="m1", status=AvailabilityStatus.AVAILABLE
+            )
+        ],
         missing_threshold=2,
     )
     assert result.observations[0].status is AvailabilityStatus.SUSPECT_MISSING

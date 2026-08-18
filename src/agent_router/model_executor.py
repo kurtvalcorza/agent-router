@@ -33,6 +33,10 @@ class ModelInvocationFailed(RuntimeError):
     pass
 
 
+class UnknownProvider(KeyError):
+    """Raised when no adapter is registered for a routed model's provider."""
+
+
 class RoutedModelExecutor:
     def __init__(
         self,
@@ -83,6 +87,10 @@ class RoutedModelExecutor:
         for profile in candidates:
             try:
                 response = self.invoke(profile.provider, profile.name, task)
+            except UnknownProvider:
+                # A missing provider adapter is a configuration error, not a transient
+                # invocation failure: fail fast instead of exhausting every candidate.
+                raise
             except Exception as exc:  # provider adapters normalize provider failures
                 failures.append(f"{profile.provider}/{profile.name}: {exc}")
                 continue

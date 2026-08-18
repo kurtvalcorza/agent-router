@@ -95,3 +95,28 @@ def test_executor_falls_back_to_next_ranked_model() -> None:
     assert result.metadata["model"] == "fallback"
     assert len(result.metadata["fallback_failures"]) == 1
     assert calls == ["cheap", "fallback"]
+
+
+def test_unknown_provider_fails_fast_without_exhausting_candidates() -> None:
+    # Regression: an unregistered provider is a config error and must propagate immediately,
+    # not be caught as a transient failure and retried across every candidate.
+    import pytest
+
+    from agent_router import ProviderInvoker, UnknownProvider
+
+    registry = ModelRegistry(
+        [
+            ModelProfile(
+                name="model-small",
+                provider="provider-a",
+                execution_classes={ExecutionClass.LIGHT_REASONING},
+                capabilities={Requirement.SEMANTIC_REASONING},
+                input_cost_per_million=1.0,
+                output_cost_per_million=2.0,
+            )
+        ]
+    )
+    executor = RoutedModelExecutor(registry=registry, invoke=ProviderInvoker({}))
+
+    with pytest.raises(UnknownProvider):
+        executor(_task(), _context())

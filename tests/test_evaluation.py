@@ -6,7 +6,6 @@ from agent_router.evaluation import (
     summarize_strategy,
 )
 
-
 CASES = [
     EvaluationCase(id="a", task_kind="simple", minimum_quality=0.8),
     EvaluationCase(id="b", task_kind="hard", minimum_quality=0.9),

@@ -73,7 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
     provider_fetch.add_argument("provider", choices=["openai", "anthropic"])
     provider_fetch.add_argument("--output", required=True)
 
-    evaluation = subparsers.add_parser("evaluation", help="train, summarize, and gate benchmark results")
+    evaluation = subparsers.add_parser(
+        "evaluation", help="train, summarize, and gate benchmark results"
+    )
     evaluation_sub = evaluation.add_subparsers(dest="evaluation_command", required=True)
     report = evaluation_sub.add_parser("report", help="compare a strategy with a baseline")
     report.add_argument("--cases", required=True)
@@ -146,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
                 inventory,
                 pricing,
                 previous=previous,
-                expected=expected,
+                expected_models=expected,
                 missing_threshold=args.missing_threshold,
             )
             write_availability_state(args.state_output, result.observations)
@@ -262,7 +264,12 @@ def _load_model_map(path: str | Path) -> dict[str, dict[str, object]]:
         raise ValueError("long_context_thresholds must be an object")
     normalized_thresholds: dict[str, int] = {}
     for key, value in thresholds.items():
-        if not isinstance(key, str) or isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        if (
+            not isinstance(key, str)
+            or isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 1
+        ):
             raise ValueError("long_context_thresholds must map names to positive integers")
         if key not in models:
             raise ValueError(f"long-context model {key!r} is not present in the model map")

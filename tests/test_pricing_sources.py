@@ -1,11 +1,16 @@
 from agent_router import AnthropicPricingSource, OpenAIModelPricingSource
 
-
 ANTHROPIC_HTML = """
 <html><body>
 <table>
-<tr><th>Model</th><th>Base Input Tokens</th><th>5m Cache Writes</th><th>1h Cache Writes</th><th>Cache Hits &amp; Refreshes</th><th>Output Tokens</th></tr>
-<tr><td>Claude Sonnet 4</td><td>$3 / MTok</td><td>$3.75 / MTok</td><td>$6 / MTok</td><td>$0.30 / MTok</td><td>$15 / MTok</td></tr>
+<tr>
+<th>Model</th><th>Base Input Tokens</th><th>5m Cache Writes</th>
+<th>1h Cache Writes</th><th>Cache Hits &amp; Refreshes</th><th>Output Tokens</th>
+</tr>
+<tr>
+<td>Claude Sonnet 4</td><td>$3 / MTok</td><td>$3.75 / MTok</td>
+<td>$6 / MTok</td><td>$0.30 / MTok</td><td>$15 / MTok</td>
+</tr>
 </table>
 <table>
 <tr><th>Model</th><th>Batch input</th><th>Batch output</th></tr>
@@ -21,8 +26,10 @@ ANTHROPIC_HTML = """
 OPENAI_HTML = """
 <html><body>
 <h1>GPT-5.6 Sol</h1>
-<section>Text tokens Per 1M tokens Input $5.00 Cached input $0.50 Output $30.00</section>
-<p>Prompts with &gt;272K input tokens are priced at 2x input and 1.5x output for the full request.</p>
+<section>Text tokens Per 1M tokens
+Input $5.00 Cached input $0.50 Output $30.00</section>
+<p>Prompts with
+&gt;272K input tokens are priced at 2x input and 1.5x output for the full request.</p>
 <p>Cache writes are billed at 1.25x the uncached input token rate.</p>
 </body></html>
 """
@@ -82,3 +89,23 @@ def test_openai_pricing_source_parses_model_page_and_long_context_rule():
     assert pricing.long_context_input == 10.0
     assert pricing.long_context_output == 45.0
     assert record.provenance.source.endswith("/gpt-5.6-sol")
+
+
+def test_openai_pricing_source_does_not_read_cached_rate_as_standard_input():
+    # Regression: ``\bInput\b`` also matches inside "Cached input"; when the page lists the
+    # cached rate first, ``standard_input`` used to capture $0.50 instead of $2.00.
+    html = """
+    <html><body>
+    <section>Cached input $0.50 Input $2.00 Output $8.00</section>
+    </body></html>
+    """
+    source = OpenAIModelPricingSource(
+        {"gpt-x": "https://developers.openai.com/api/docs/models/gpt-x"},
+        fetch_text=lambda url: html,
+    )
+
+    pricing = source.fetch()[0].pricing
+
+    assert pricing.standard_input == 2.0
+    assert pricing.cached_input == 0.5
+    assert pricing.standard_output == 8.0

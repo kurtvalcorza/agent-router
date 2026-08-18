@@ -8,6 +8,7 @@ from agent_router import (
     ExecutionClass,
     ModelCatalog,
     ModelProfile,
+    PricingProfile,
     ProviderModelSnapshot,
     Requirement,
     diff_catalogs,
@@ -120,6 +121,45 @@ def test_promotion_rejects_capability_change() -> None:
 
     with pytest.raises(CatalogPromotionError, match="capabilities"):
         promote_candidate(current, candidate)
+
+
+def test_flat_cost_snapshot_updates_structured_pricing_profile() -> None:
+    # Regression: a flat-cost-only snapshot updated the flat fields (and the diff) but left
+    # the structured ``pricing`` profile stale, so cost estimation and serialization kept the
+    # old rate that the diff claimed had changed.
+    current = ModelCatalog(
+        metadata=CatalogMetadata(version="1", pricing_as_of="2026-08-01", pricing_source="local"),
+        profiles=(
+            ModelProfile(
+                name="model-a",
+                provider="provider-a",
+                execution_classes={ExecutionClass.LIGHT_REASONING},
+                capabilities={Requirement.SEMANTIC_REASONING},
+                pricing=PricingProfile(standard_input=2.0, standard_output=8.0, cached_input=0.2),
+            ),
+        ),
+    )
+
+    candidate = synchronize_catalog(
+        current,
+        [
+            ProviderModelSnapshot(
+                provider="provider-a",
+                name="model-a",
+                input_cost_per_million=99.0,
+                output_cost_per_million=88.0,
+            )
+        ],
+    ).candidate
+
+    profile = candidate.profiles[0]
+    # The structured profile the router actually uses now reflects the update...
+    assert profile.pricing_profile.standard_input == 99.0
+    assert profile.pricing_profile.standard_output == 88.0
+    # ...while preserving other pricing dimensions...
+    assert profile.pricing_profile.cached_input == 0.2
+    # ...and the estimated cost matches the advertised change.
+    assert profile.estimate_cost(input_tokens=1_000_000) == 99.0
 
 
 def test_promotion_accepts_pricing_change() -> None:

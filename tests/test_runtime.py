@@ -79,6 +79,29 @@ def test_budget_is_enforced_after_executor_reports_usage() -> None:
         runtime.execute(task, budget=Budget(max_cost_usd=0.01))
 
 
+def test_exhausted_model_call_budget_gates_before_invocation() -> None:
+    # An already-spent model-call budget must not fund another real invocation only to raise
+    # afterwards in ``consume``; the runtime gates before calling the executor.
+    invocations: list[str] = []
+
+    def light_executor(task, ctx):
+        invocations.append(task.kind)
+        return ExecutionResult(output="answer", model_calls=1, cost_usd=0.0)
+
+    runtime = RouterRuntime()
+    runtime.register_executor(ExecutionClass.LIGHT_REASONING, light_executor)
+
+    task = Task(
+        kind="semantic",
+        payload={"question": "why?"},
+        requirements={Requirement.SEMANTIC_REASONING},
+    )
+
+    with pytest.raises(BudgetExceeded, match="model-call budget exceeded"):
+        runtime.execute(task, budget=Budget(max_model_calls=1, model_calls=1))
+    assert invocations == []
+
+
 def test_missing_executor_escalates() -> None:
     runtime = RouterRuntime(max_attempts=2)
     runtime.register_executor(

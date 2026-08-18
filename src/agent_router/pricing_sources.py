@@ -135,17 +135,20 @@ class OpenAIModelPricingSource:
 
     @staticmethod
     def _parse_pricing(text: str) -> PricingProfile:
-        def price(label: str) -> float:
-            match = re.search(
+        def price(label: str, *, forbid_prefix: str | None = None) -> float:
+            for match in re.finditer(
                 rf"\b{re.escape(label)}\b\s*\$?([0-9]+(?:\.[0-9]+)?)",
                 text,
                 flags=re.IGNORECASE,
-            )
-            if match is None:
-                raise PricingSourceError(f"OpenAI model page missing {label!r} price")
-            return float(match.group(1))
+            ):
+                # ``\bInput\b`` also matches the "input" inside "Cached input"; skip any
+                # occurrence that is part of a longer label so the standalone rate is read.
+                if forbid_prefix and text[: match.start()].rstrip().lower().endswith(forbid_prefix):
+                    continue
+                return float(match.group(1))
+            raise PricingSourceError(f"OpenAI model page missing {label!r} price")
 
-        standard_input = price("Input")
+        standard_input = price("Input", forbid_prefix="cached")
         cached_input = price("Cached input")
         standard_output = price("Output")
         pricing = PricingProfile(
@@ -205,7 +208,9 @@ class AnthropicPricingSource:
             required_table=False,
         )
         long_context = self._find_long_context_table(parser.tables)
-        long_rates = self._parse_long_context_table(long_context) if long_context is not None else None
+        long_rates = (
+            self._parse_long_context_table(long_context) if long_context is not None else None
+        )
         batch_rows = self._rows_by_model(batch) if batch is not None else {}
         base_rows = self._rows_by_model(base)
         provenance = SourceProvenance.from_payload(
@@ -239,7 +244,8 @@ class AnthropicPricingSource:
             if threshold is not None:
                 if long_rates is None:
                     raise PricingSourceError(
-                        f"long-context pricing requested for {display_name!r}, but rule table was not found"
+                        f"long-context pricing requested for {display_name!r}, "
+                        "but rule table was not found"
                     )
                 long_input, long_output = long_rates
                 pricing = replace(
@@ -271,7 +277,9 @@ class AnthropicPricingSource:
             if table and required.issubset(set(table[0])):
                 return table
         if required_table:
-            raise PricingSourceError(f"pricing table missing expected columns: {sorted(required)!r}")
+            raise PricingSourceError(
+                f"pricing table missing expected columns: {sorted(required)!r}"
+            )
         return None
 
     @staticmethod

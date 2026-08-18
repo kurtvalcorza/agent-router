@@ -17,12 +17,14 @@ def test_cache_and_batch_pricing():
         batch_input=1.0,
         batch_output=4.0,
     )
+    # 500k ordinary input @2.0 + 400k cached @0.2 + 100k cache-write @2.5 + 100k output @8.0
+    # = (1_000_000 + 80_000 + 250_000 + 800_000) / 1e6 = 2.13
     assert pricing.estimate(
         input_tokens=1_000_000,
         output_tokens=100_000,
         cached_input_tokens=400_000,
         cache_write_tokens=100_000,
-    ) == pytest.approx(1.53)
+    ) == pytest.approx(2.13)
     assert pricing.estimate(
         input_tokens=1_000_000,
         output_tokens=100_000,

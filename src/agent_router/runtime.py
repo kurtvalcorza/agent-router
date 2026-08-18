@@ -65,6 +65,7 @@ class RouterRuntime:
                 attempt += 1
                 continue
 
+            self._check_model_call_budget(budget)
             context = ExecutionContext(budget=budget, attempt=attempt, decision=decision)
             result = executor(task, context)
             budget.consume(
@@ -115,3 +116,10 @@ class RouterRuntime:
         elapsed = monotonic() - started
         if budget.max_latency_seconds is not None and elapsed > budget.max_latency_seconds:
             raise BudgetExceeded("latency budget exceeded")
+
+    @staticmethod
+    def _check_model_call_budget(budget: Budget) -> None:
+        # Gate before invocation: an already-exhausted model-call budget must not spend
+        # another real provider call only to raise afterwards in ``consume``.
+        if budget.max_model_calls is not None and budget.model_calls >= budget.max_model_calls:
+            raise BudgetExceeded("model-call budget exceeded")

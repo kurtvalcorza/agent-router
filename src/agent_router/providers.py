@@ -4,10 +4,19 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from .model_executor import ModelResponse
+from .model_executor import ModelResponse, UnknownProvider
 from .types import Task
 
 PromptBuilder = Callable[[Task], str]
+
+__all__ = [
+    "AnthropicMessagesAdapter",
+    "OpenAIResponsesAdapter",
+    "ProviderAdapter",
+    "ProviderInvoker",
+    "UnknownProvider",
+    "default_prompt_builder",
+]
 
 
 class ProviderAdapter(Protocol):
@@ -22,10 +31,6 @@ def default_prompt_builder(task: Task) -> str:
     if isinstance(question, str):
         return question
     return str(task.payload)
-
-
-class UnknownProvider(KeyError):
-    pass
 
 
 class ProviderInvoker:

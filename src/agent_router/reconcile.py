@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Iterable
+from enum import StrEnum
 
 from .catalog_sync import ProviderModelSnapshot
 from .provenance import InventoryRecord, PricingRecord
 
 
-class AvailabilityStatus(str, Enum):
+class AvailabilityStatus(StrEnum):
     AVAILABLE = "available"
     SUSPECT_MISSING = "suspect_missing"
     CONFIRMED_UNAVAILABLE = "confirmed_unavailable"
@@ -106,8 +106,12 @@ def reconcile_records(
             ProviderModelSnapshot(
                 provider=provider,
                 name=model,
-                input_cost_per_million=(pricing_profile.standard_input if pricing_profile else None),
-                output_cost_per_million=(pricing_profile.standard_output if pricing_profile else None),
+                input_cost_per_million=(
+                    pricing_profile.standard_input if pricing_profile else None
+                ),
+                output_cost_per_million=(
+                    pricing_profile.standard_output if pricing_profile else None
+                ),
                 pricing=pricing_profile,
                 metadata={
                     "availability_status": status.value,

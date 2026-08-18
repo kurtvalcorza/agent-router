@@ -1,5 +1,6 @@
 from agent_router import AvailabilityStatus, PricingProfile
 from agent_router.provenance import InventoryRecord, PricingRecord, SourceProvenance
+from agent_router.reconcile import AvailabilityObservation
 from agent_router.records_io import (
     load_availability_state,
     load_inventory,
@@ -8,7 +9,6 @@ from agent_router.records_io import (
     write_inventory,
     write_pricing,
 )
-from agent_router.reconcile import AvailabilityObservation
 
 
 def provenance():

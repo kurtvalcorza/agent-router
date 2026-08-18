@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class ExecutionClass(str, Enum):
+class ExecutionClass(StrEnum):
     DETERMINISTIC = "deterministic"
     RETRIEVAL = "retrieval"
     LIGHT_REASONING = "light_reasoning"
@@ -13,7 +13,7 @@ class ExecutionClass(str, Enum):
     HUMAN_REVIEW = "human_review"
 
 
-class Requirement(str, Enum):
+class Requirement(StrEnum):
     EXACT_COMPUTATION = "exact_computation"
     EXTERNAL_DATA = "external_data"
     SEMANTIC_REASONING = "semantic_reasoning"
@@ -23,13 +23,13 @@ class Requirement(str, Enum):
     HIGH_RELIABILITY = "high_reliability"
 
 
-class Risk(str, Enum):
+class Risk(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
 
 
-class VerificationStatus(str, Enum):
+class VerificationStatus(StrEnum):
     PASS = "pass"
     RETRY = "retry"
     ESCALATE = "escalate"
@@ -42,6 +42,13 @@ class Task:
     requirements: set[Requirement] = field(default_factory=set)
     risk: Risk = Risk.LOW
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        # ``frozen=True`` blocks attribute rebinding but not ``task.requirements.add(...)``;
+        # store the routing-critical set as a frozenset so a routed task cannot be mutated
+        # underneath the policy after construction.
+        if not isinstance(self.requirements, frozenset):
+            object.__setattr__(self, "requirements", frozenset(self.requirements))
 
 
 @dataclass(frozen=True, slots=True)

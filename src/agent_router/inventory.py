@@ -13,7 +13,7 @@ class OpenAIInventoryFetcher:
     parser_version: str = "openai-models-v1"
 
     @classmethod
-    def from_env(cls) -> "OpenAIInventoryFetcher":
+    def from_env(cls) -> OpenAIInventoryFetcher:
         try:
             from openai import OpenAI
         except ImportError as exc:
@@ -57,7 +57,7 @@ class AnthropicInventoryFetcher:
     parser_version: str = "anthropic-models-v1"
 
     @classmethod
-    def from_env(cls) -> "AnthropicInventoryFetcher":
+    def from_env(cls) -> AnthropicInventoryFetcher:
         try:
             from anthropic import Anthropic
         except ImportError as exc:
