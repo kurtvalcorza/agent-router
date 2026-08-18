@@ -68,7 +68,11 @@ def parse_catalog(data: object) -> ModelCatalog:
     names = {profile.name for profile in profiles}
     if len(names) != len(profiles):
         raise CatalogError("model names must be unique")
-    return ModelCatalog(metadata=metadata, profiles=profiles, aliases=_parse_aliases(data.get("aliases", {}), names))
+    return ModelCatalog(
+        metadata=metadata,
+        profiles=profiles,
+        aliases=_parse_aliases(data.get("aliases", {}), names),
+    )
 
 
 def _parse_profile(item: object, index: int) -> ModelProfile:
@@ -79,23 +83,43 @@ def _parse_profile(item: object, index: int) -> ModelProfile:
     if not isinstance(pricing_data, dict):
         raise CatalogError(prefix + "pricing must be an object")
     pp = prefix + "pricing."
-    standard_input = _non_negative_number(pricing_data.get("input_per_million", 0.0), pp + "input_per_million")
-    standard_output = _non_negative_number(pricing_data.get("output_per_million", 0.0), pp + "output_per_million")
+    standard_input = _non_negative_number(
+        pricing_data.get("input_per_million", 0.0), pp + "input_per_million"
+    )
+    standard_output = _non_negative_number(
+        pricing_data.get("output_per_million", 0.0), pp + "output_per_million"
+    )
     pricing = PricingProfile(
         standard_input=standard_input,
         standard_output=standard_output,
-        cached_input=_optional_non_negative_number(pricing_data.get("cached_input_per_million"), pp + "cached_input_per_million"),
-        cache_write=_optional_non_negative_number(pricing_data.get("cache_write_per_million"), pp + "cache_write_per_million"),
-        batch_input=_optional_non_negative_number(pricing_data.get("batch_input_per_million"), pp + "batch_input_per_million"),
-        batch_output=_optional_non_negative_number(pricing_data.get("batch_output_per_million"), pp + "batch_output_per_million"),
-        long_context_input=_optional_non_negative_number(pricing_data.get("long_context_input_per_million"), pp + "long_context_input_per_million"),
-        long_context_output=_optional_non_negative_number(pricing_data.get("long_context_output_per_million"), pp + "long_context_output_per_million"),
+        cached_input=_optional_non_negative_number(
+            pricing_data.get("cached_input_per_million"), pp + "cached_input_per_million"
+        ),
+        cache_write=_optional_non_negative_number(
+            pricing_data.get("cache_write_per_million"), pp + "cache_write_per_million"
+        ),
+        batch_input=_optional_non_negative_number(
+            pricing_data.get("batch_input_per_million"), pp + "batch_input_per_million"
+        ),
+        batch_output=_optional_non_negative_number(
+            pricing_data.get("batch_output_per_million"), pp + "batch_output_per_million"
+        ),
+        long_context_input=_optional_non_negative_number(
+            pricing_data.get("long_context_input_per_million"),
+            pp + "long_context_input_per_million",
+        ),
+        long_context_output=_optional_non_negative_number(
+            pricing_data.get("long_context_output_per_million"),
+            pp + "long_context_output_per_million",
+        ),
         long_context_threshold=_optional_positive_int(pricing_data, "long_context_threshold", pp),
     )
     return ModelProfile(
         name=_required_string(item, "name", prefix),
         provider=_required_string(item, "provider", prefix),
-        execution_classes=_enum_set(item.get("execution_classes"), ExecutionClass, prefix + "execution_classes"),
+        execution_classes=_enum_set(
+            item.get("execution_classes"), ExecutionClass, prefix + "execution_classes"
+        ),
         capabilities=_enum_set(item.get("capabilities", []), Requirement, prefix + "capabilities"),
         context_window=_optional_positive_int(item, "context_window", prefix),
         input_cost_per_million=standard_input,

@@ -4,7 +4,13 @@ from dataclasses import dataclass
 
 from .adaptive import AdaptivePolicy
 from .empirical import EmpiricalSelector
-from .model_executor import ModelInvocationFailed, ModelInvoker, TokenEstimator, default_token_estimator
+from .model_executor import (
+    ModelInvocationFailed,
+    ModelInvoker,
+    TokenEstimator,
+    UnknownProvider,
+    default_token_estimator,
+)
 from .types import ExecutionContext, ExecutionResult, Task
 
 
@@ -48,6 +54,9 @@ class EmpiricalRoutedModelExecutor:
             profile = candidate.profile
             try:
                 response = self.invoke(profile.provider, profile.name, task)
+            except UnknownProvider:
+                # Configuration error, not a transient failure: fail fast.
+                raise
             except Exception as exc:
                 failures.append(f"{profile.provider}/{profile.name}: {exc}")
                 continue
@@ -77,4 +86,6 @@ class EmpiricalRoutedModelExecutor:
                 metadata=metadata,
             )
 
-        raise ModelInvocationFailed("all empirical model invocations failed: " + "; ".join(failures))
+        raise ModelInvocationFailed(
+            "all empirical model invocations failed: " + "; ".join(failures)
+        )

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import Protocol
 
 from .catalog_sync import ProviderModelSnapshot
 from .pricing import PricingProfile

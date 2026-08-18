@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .pricing import PricingProfile
 
@@ -23,12 +23,12 @@ class SourceProvenance:
         payload: object,
         retrieved_at: str | None = None,
         parser_version: str = "1",
-    ) -> "SourceProvenance":
+    ) -> SourceProvenance:
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         return cls(
             source=source,
-            retrieved_at=retrieved_at or datetime.now(timezone.utc).isoformat(),
+            retrieved_at=retrieved_at or datetime.now(UTC).isoformat(),
             content_hash=digest,
             parser_version=parser_version,
         )

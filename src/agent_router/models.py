@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 from .pricing import PricingProfile
 from .types import ExecutionClass, Requirement, Task
@@ -40,14 +40,18 @@ class ModelProfile:
             return False
         if not task.requirements.issubset(self.capabilities):
             return False
-        required_context = task.metadata.get("context_tokens")
-        if (
-            isinstance(required_context, int)
+        required_context = _required_context_tokens(task)
+        return not (
+            required_context is not None
             and self.context_window is not None
             and required_context > self.context_window
-        ):
-            return False
-        return True
+        )
+
+    @property
+    def list_price_per_million(self) -> float:
+        """Flat list price used to break estimated-cost ties when token estimates are absent."""
+        pricing = self.pricing_profile
+        return pricing.standard_input + pricing.standard_output
 
     def estimate_cost(
         self,
@@ -65,6 +69,28 @@ class ModelProfile:
             cache_write_tokens=cache_write_tokens,
             batch=batch,
         )
+
+
+def _required_context_tokens(task: Task) -> int | None:
+    """Context size a task needs, from an explicit hint or the estimated token budget.
+
+    Prefers an explicit ``context_tokens`` hint; otherwise falls back to the same
+    ``estimated_input_tokens``/``estimated_output_tokens`` the routing pipeline populates,
+    so the context-window guard is enforced on the real invocation path and not only when
+    a caller happens to set ``context_tokens``.
+    """
+    explicit = task.metadata.get("context_tokens")
+    if isinstance(explicit, int):
+        return explicit
+    estimated_input = task.metadata.get("estimated_input_tokens")
+    estimated_output = task.metadata.get("estimated_output_tokens")
+    total = 0
+    seen = False
+    for value in (estimated_input, estimated_output):
+        if isinstance(value, int):
+            total += value
+            seen = True
+    return total if seen else None
 
 
 class NoEligibleModel(RuntimeError):
@@ -126,6 +152,7 @@ class ModelRegistry:
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                 ),
+                profile.list_price_per_million,
                 -profile.reliability,
                 profile.name,
             ),

@@ -156,11 +156,17 @@ def _pricing_from_dict(item: object) -> PricingRecord:
     raw = item.get("pricing")
     if not isinstance(raw, dict):
         raise RecordIOError("pricing field must be an object")
+    try:
+        pricing = PricingProfile(**raw)
+    except (TypeError, ValueError) as exc:
+        raise RecordIOError(f"invalid pricing profile: {exc}") from exc
     return PricingRecord(
         provider=str(item["provider"]),
         model_id=str(item["model_id"]),
-        pricing=PricingProfile(**raw),
-        effective_at=item.get("effective_at") if isinstance(item.get("effective_at"), str) else None,
+        pricing=pricing,
+        effective_at=(
+            item.get("effective_at") if isinstance(item.get("effective_at"), str) else None
+        ),
         metadata=dict(item.get("metadata", {})),
         provenance=_provenance_from_dict(item.get("provenance")),
     )

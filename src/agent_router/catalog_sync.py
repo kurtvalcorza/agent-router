@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
-from typing import Iterable
 
 from .catalog import ModelCatalog
 from .models import ModelProfile
@@ -89,7 +89,10 @@ def synchronize_catalog(
         snapshot = snapshot_by_key.get((profile.provider, profile.name))
         if snapshot is None:
             profiles.append(profile)
-            warnings.append(f"catalog model missing from provider snapshot: {profile.provider}/{profile.name}")
+            warnings.append(
+                "catalog model missing from provider snapshot: "
+                f"{profile.provider}/{profile.name}"
+            )
             continue
 
         metadata = dict(profile.metadata)
@@ -107,6 +110,29 @@ def synchronize_catalog(
             if pricing is not None
             else snapshot.output_cost_per_million
         )
+
+        # A flat-cost-only snapshot must also update the structured ``pricing`` profile,
+        # otherwise ``pricing_profile`` and serialization keep the stale rate while the diff
+        # advertises a change that never takes effect. Preserve the profile's other pricing
+        # dimensions (cache/batch/long-context) and update only the standard rates.
+        if pricing is None and (
+            snapshot.input_cost_per_million is not None
+            or snapshot.output_cost_per_million is not None
+        ):
+            base_pricing = profile.pricing or profile.pricing_profile
+            pricing = replace(
+                base_pricing,
+                standard_input=(
+                    standard_input
+                    if standard_input is not None
+                    else base_pricing.standard_input
+                ),
+                standard_output=(
+                    standard_output
+                    if standard_output is not None
+                    else base_pricing.standard_output
+                ),
+            )
 
         profiles.append(
             replace(
@@ -177,9 +203,23 @@ def diff_catalogs(before: ModelCatalog, after: ModelCatalog) -> CatalogDiff:
     if before.aliases != after.aliases:
         changed.append(CatalogChange("<catalog>", "aliases", before.aliases, after.aliases))
     if before.metadata.pricing_as_of != after.metadata.pricing_as_of:
-        changed.append(CatalogChange("<catalog>", "pricing_as_of", before.metadata.pricing_as_of, after.metadata.pricing_as_of))
+        changed.append(
+            CatalogChange(
+                "<catalog>",
+                "pricing_as_of",
+                before.metadata.pricing_as_of,
+                after.metadata.pricing_as_of,
+            )
+        )
     if before.metadata.pricing_source != after.metadata.pricing_source:
-        changed.append(CatalogChange("<catalog>", "pricing_source", before.metadata.pricing_source, after.metadata.pricing_source))
+        changed.append(
+            CatalogChange(
+                "<catalog>",
+                "pricing_source",
+                before.metadata.pricing_source,
+                after.metadata.pricing_source,
+            )
+        )
 
     return CatalogDiff(added=added, removed=removed, changed=tuple(changed))
 

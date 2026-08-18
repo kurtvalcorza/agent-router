@@ -68,6 +68,8 @@ def grade_output(case: EvaluationCase, output: object) -> Grade:
     expected = case.metadata.get("expected")
 
     if grader == "exact_match":
+        if "expected" not in case.metadata:
+            raise BenchmarkSpecError(f"case {case.id!r} exact_match grader requires expected")
         success = output == expected
         return Grade(quality=1.0 if success else 0.0, success=success)
 
@@ -150,7 +152,9 @@ def fixed_model_executor(
     return execute
 
 
-def runtime_executor(runtime, *, budget_factory: Callable[[], Budget] | None = None) -> TaskExecutor:
+def runtime_executor(
+    runtime, *, budget_factory: Callable[[], Budget] | None = None
+) -> TaskExecutor:
     budget_factory = budget_factory or Budget
 
     def execute(task: Task):
