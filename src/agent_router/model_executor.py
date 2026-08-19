@@ -49,6 +49,20 @@ def _remaining_model_calls(context: ExecutionContext) -> int | None:
     return max(budget.max_model_calls - budget.model_calls, 0)
 
 
+def _record_failed_calls(context: ExecutionContext, failed: int) -> None:
+    """Persist provider calls that were attempted but failed into the budget.
+
+    The success path reports every attempt (including failed fallbacks) via
+    ``ExecutionResult.model_calls`` for runtime to consume. The raising paths produce no
+    result, so without this the calls they made are invisible to a Budget reused across
+    ``execute`` calls, letting a later run exceed ``max_model_calls``. The fan-out guard
+    bounds ``failed`` to the remaining allowance, so this never pushes ``model_calls`` past
+    ``max_model_calls`` and ``consume`` cannot raise here.
+    """
+    if failed:
+        context.budget.consume(model_calls=failed)
+
+
 class RoutedModelExecutor:
     def __init__(
         self,
@@ -98,43 +112,51 @@ class RoutedModelExecutor:
         remaining_model_calls = _remaining_model_calls(context)
 
         failures: list[str] = []
-        for profile in candidates:
-            if remaining_model_calls is not None and len(failures) >= remaining_model_calls:
-                # Each attempt (success or failure) is one real provider call. Stop the
-                # fallback fan-out before it exceeds the model-call budget, instead of
-                # letting runtime's post-call accounting catch the overspend afterward.
-                raise BudgetExceeded("model-call budget exhausted during provider fallback")
-            try:
-                response = self.invoke(profile.provider, profile.name, task)
-            except UnknownProvider:
-                # A missing provider adapter is a configuration error, not a transient
-                # invocation failure: fail fast instead of exhausting every candidate.
-                raise
-            except Exception as exc:  # provider adapters normalize provider failures
-                failures.append(f"{profile.provider}/{profile.name}: {exc}")
-                continue
+        try:
+            for profile in candidates:
+                if remaining_model_calls is not None and len(failures) >= remaining_model_calls:
+                    # Each attempt (success or failure) is one real provider call. Stop the
+                    # fallback fan-out before it exceeds the model-call budget, instead of
+                    # letting runtime's post-call accounting catch the overspend afterward.
+                    raise BudgetExceeded("model-call budget exhausted during provider fallback")
+                try:
+                    response = self.invoke(profile.provider, profile.name, task)
+                except UnknownProvider:
+                    # A missing provider adapter is a configuration error, not a transient
+                    # invocation failure: fail fast instead of exhausting every candidate.
+                    raise
+                except Exception as exc:  # provider adapters normalize provider failures
+                    failures.append(f"{profile.provider}/{profile.name}: {exc}")
+                    continue
 
-            cost = profile.estimate_cost(
-                input_tokens=response.input_tokens,
-                output_tokens=response.output_tokens,
-            )
-            metadata = dict(response.metadata or {})
-            metadata.update(
-                {
-                    "model": profile.name,
-                    "provider": profile.provider,
-                    "input_tokens": response.input_tokens,
-                    "output_tokens": response.output_tokens,
-                    "reliability_floor": reliability_floor,
-                    "fallback_failures": tuple(failures),
-                }
-            )
+                cost = profile.estimate_cost(
+                    input_tokens=response.input_tokens,
+                    output_tokens=response.output_tokens,
+                )
+                metadata = dict(response.metadata or {})
+                metadata.update(
+                    {
+                        "model": profile.name,
+                        "provider": profile.provider,
+                        "input_tokens": response.input_tokens,
+                        "output_tokens": response.output_tokens,
+                        "reliability_floor": reliability_floor,
+                        "fallback_failures": tuple(failures),
+                    }
+                )
 
-            return ExecutionResult(
-                output=response.output,
-                cost_usd=cost,
-                model_calls=len(failures) + 1,
-                metadata=metadata,
-            )
+                return ExecutionResult(
+                    output=response.output,
+                    cost_usd=cost,
+                    model_calls=len(failures) + 1,
+                    metadata=metadata,
+                )
 
-        raise ModelInvocationFailed("all eligible model invocations failed: " + "; ".join(failures))
+            raise ModelInvocationFailed(
+                "all eligible model invocations failed: " + "; ".join(failures)
+            )
+        except (BudgetExceeded, ModelInvocationFailed, UnknownProvider):
+            # These paths return no ExecutionResult, so runtime never accounts for the calls
+            # already made. Record the failed attempts so a reused Budget stays accurate.
+            _record_failed_calls(context, len(failures))
+            raise
