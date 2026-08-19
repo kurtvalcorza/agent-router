@@ -8,6 +8,7 @@ from agent_router import (
     EmpiricalSuccessModel,
     ExecutionClass,
     ExecutionContext,
+    ModelInvocationFailed,
     ModelProfile,
     ModelRegistry,
     ModelResponse,
@@ -87,3 +88,20 @@ def test_empirical_fallback_within_budget_succeeds() -> None:
     assert result.output == "ok"
     assert result.model_calls == 2
     assert calls == ["c1", "c2"]
+
+
+def test_empirical_failed_invocations_are_recorded_into_budget() -> None:
+    calls: list[str] = []
+
+    def invoke(provider: str, model: str, task: Task) -> ModelResponse:
+        calls.append(model)
+        raise RuntimeError("temporary provider failure")
+
+    executor = _executor(_registry(), invoke)
+    budget = Budget(max_model_calls=5)
+
+    with pytest.raises(ModelInvocationFailed):
+        executor(_task(), _context(budget))
+
+    assert calls == ["c1", "c2", "c3"]
+    assert budget.model_calls == 3

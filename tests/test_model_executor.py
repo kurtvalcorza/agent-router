@@ -5,6 +5,7 @@ from agent_router import (
     BudgetExceeded,
     ExecutionClass,
     ExecutionContext,
+    ModelInvocationFailed,
     ModelProfile,
     ModelRegistry,
     ModelResponse,
@@ -191,3 +192,41 @@ def test_fallback_within_model_call_budget_still_succeeds() -> None:
     assert result.output == "ok"
     assert result.model_calls == 2
     assert calls == ["c1", "c2"]
+
+
+def test_failed_invocations_are_recorded_into_budget() -> None:
+    # Regression: when the executor raises (all candidates failed), the real calls it made
+    # were not persisted into Budget.model_calls, so a reused Budget undercounted them.
+    calls: list[str] = []
+
+    def invoke(provider: str, model: str, task: Task) -> ModelResponse:
+        calls.append(model)
+        raise RuntimeError("temporary provider failure")
+
+    executor = RoutedModelExecutor(registry=_three_tier_registry(), invoke=invoke)
+    budget = Budget(max_model_calls=5)
+
+    with pytest.raises(ModelInvocationFailed):
+        executor(_task(), _context(budget))
+
+    assert calls == ["c1", "c2", "c3"]
+    assert budget.model_calls == 3  # all three failed attempts recorded
+
+
+def test_fan_out_budget_exceeded_records_exactly_the_attempts_made() -> None:
+    # The budget-exhausted fallback path records the calls it made — no more, no less — so
+    # model_calls lands exactly on the cap rather than staying at 0.
+    calls: list[str] = []
+
+    def invoke(provider: str, model: str, task: Task) -> ModelResponse:
+        calls.append(model)
+        raise RuntimeError("temporary provider failure")
+
+    executor = RoutedModelExecutor(registry=_three_tier_registry(), invoke=invoke)
+    budget = Budget(max_model_calls=2)
+
+    with pytest.raises(BudgetExceeded):
+        executor(_task(), _context(budget))
+
+    assert calls == ["c1", "c2"]
+    assert budget.model_calls == 2
