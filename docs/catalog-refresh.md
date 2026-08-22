@@ -2,6 +2,11 @@
 
 The operational refresh path keeps provider observations, pricing, availability state, and the pinned catalog separate.
 
+This workflow reconciles against live provider state, so it needs credentials and a catalog
+naming real models. `config/models.yaml` below is the catalog you create by copying
+`config/models.example.yaml` and replacing its placeholder values; see the README's benchmark
+section. `agent-router catalog check config/models.example.yaml` runs without either.
+
 ```bash
 # 1. Fetch live OpenAI model inventory.
 agent-router provider fetch openai \
