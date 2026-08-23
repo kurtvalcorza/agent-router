@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Documented catalog paths pointed at `config/models.yaml`, which the repository does not ship, so every documented CLI example failed on a clean checkout. Commands that run offline now use `config/models.example.yaml`; live workflows use `config/models.yaml` and the docs say how to create it.
+- `tests/test_catalog.py` used an invalid `\[` string escape, which raises a `DeprecationWarning` today and is slated to become a `SyntaxError`.
+
+### Added
+
+- `examples/quickstart.py`: runs hard-policy routing, adaptive reliability floors, cheapest-eligible selection, and verification-driven escalation with a stub invoker, so the router can be evaluated without provider credentials or spend. Covered by `tests/test_quickstart_example.py`.
+- README now states that `agent-router-benchmark` issues real, billed provider calls and cannot run against the placeholder example catalog.
+
+### Changed
+
+- The `dev` extra now includes `PyYAML` so CI exercises the YAML catalog loader.
+
 ## 0.1.0 — 2026-08-18
 
 Initial private release of `agent-router`.

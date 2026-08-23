@@ -40,6 +40,40 @@ The core principles are:
 - **Pricing is data, not code.** Catalogs carry dated pricing metadata so cost updates do not require runtime changes.
 - **Provider facts do not define policy.** Upstream metadata may refresh prices and context limits, but capability, reliability, aliases, and execution-class assignments require local review.
 
+## Quickstart
+
+The router calls providers through a plain callable, so the whole decision path runs offline with a
+stub in place of the provider adapters. `examples/quickstart.py` does exactly that -- no API keys,
+no spend:
+
+```bash
+python -m pip install -e '.[catalog]'
+python examples/quickstart.py
+```
+
+```text
+1. cheap task, cheap model
+   routed to light_reasoning: task requires bounded semantic reasoning
+      provider call -> openai/small-model
+   answered by small-model (floor 0.82) for $0.000010 in 1 model call(s)
+
+2. high-reliability task skips the cheap model entirely
+   routed to deep_reasoning: task requires high-capability reasoning
+      provider call -> anthropic/strong-model
+   answered by strong-model (floor 0.95) for $0.001920 in 1 model call(s)
+
+3. cheap model answers wrong, verification escalates
+   routed to light_reasoning: task requires bounded semantic reasoning
+      provider call -> openai/small-model
+      provider call -> anthropic/strong-model
+   answered by strong-model (floor 0.82) for $0.001475 in 2 model call(s)
+```
+
+Scenario 2 shows the adaptive reliability floor rising from 0.82 to 0.95 and disqualifying the
+0.90-reliability cheap model before cost ranking. Scenario 3 shows verification-driven escalation
+across execution classes. Swap `stub_invoke` for a real `ProviderInvoker` to run the same paths
+against live providers.
+
 ## Policy modes
 
 `AdaptivePolicy` provides four reusable operating modes:
@@ -62,7 +96,7 @@ python -m pip install 'agent-router[catalog]'
 ```python
 from agent_router import load_catalog
 
-catalog = load_catalog("config/models.yaml")
+catalog = load_catalog("config/models.example.yaml")
 registry = catalog.registry()
 
 print(catalog.metadata.pricing_as_of)
@@ -100,15 +134,17 @@ Synchronization intentionally updates only operational provider facts: context w
 Installing the package exposes an `agent-router` command:
 
 ```bash
-agent-router catalog check config/models.yaml
-agent-router catalog diff config/models.yaml config/models.candidate.yaml
-agent-router catalog sync config/models.yaml snapshots.json \
+agent-router catalog check config/models.example.yaml
+agent-router catalog diff config/models.example.yaml config/models.candidate.yaml
+agent-router catalog sync config/models.example.yaml snapshots.json \
   --output config/models.candidate.yaml \
   --pricing-as-of 2026-08-17 \
   --pricing-source provider-pricing-page
 ```
 
 `catalog sync` never overwrites the pinned source catalog. It writes a candidate file, prints warnings for unmanaged or missing provider models, and prints the structured diff for review.
+
+The commands above use the shipped `config/models.example.yaml` so they run against a clean checkout. In production, point them at your own reviewed catalog instead.
 
 ### Provider inventory and pricing
 
@@ -131,6 +167,20 @@ Pricing adapters preserve source provenance and fail closed when expected author
 
 `benchmarks/cases.example.json` shows the benchmark case convention. Each case declares its task payload, routing requirements, risk, expected output, token estimates, and grader inside `metadata`. The harness compiles that deterministically into a real `Task`.
 
+`agent-router-benchmark` issues **real, billed provider calls**. It builds adapters with
+`OpenAIResponsesAdapter.from_env()` / `AnthropicMessagesAdapter.from_env()` for every provider in
+the catalog, so it needs `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` and spends money on every run.
+
+It also needs a catalog naming **real** models. The `small-model` and `strong-model` entries in
+`config/models.example.yaml` are placeholders that exist at neither provider, so the benchmark
+cannot run against the shipped example even with valid keys. Create your own catalog first:
+
+```bash
+cp config/models.example.yaml config/models.yaml
+# then replace the model names, pricing, reliability, and pricing source with reviewed values
+```
+
+The commands in this section and in `docs/catalog-refresh.md` assume that `config/models.yaml`.
 Install provider extras and run the static router plus fixed baselines against the same corpus:
 
 ```bash

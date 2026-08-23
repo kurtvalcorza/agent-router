@@ -71,7 +71,7 @@ def test_invalid_enum_value_is_rejected() -> None:
     assert isinstance(model, dict)
     model["execution_classes"] = ["warp_speed"]
 
-    with pytest.raises(CatalogError, match="invalid models\[0\].execution_classes value"):
+    with pytest.raises(CatalogError, match=r"invalid models\[0\]\.execution_classes value"):
         parse_catalog(data)
 
 
