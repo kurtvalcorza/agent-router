@@ -11,6 +11,7 @@ PromptBuilder = Callable[[Task], str]
 
 __all__ = [
     "AnthropicMessagesAdapter",
+    "GeminiAdapter",
     "OpenAIResponsesAdapter",
     "ProviderAdapter",
     "ProviderInvoker",
@@ -145,6 +146,50 @@ class AnthropicMessagesAdapter:
         )
 
 
+@dataclass(slots=True)
+class GeminiAdapter:
+    """Thin adapter for the Google Gemini API with an injected SDK client."""
+
+    client: Any
+    prompt_builder: PromptBuilder = default_prompt_builder
+
+    @classmethod
+    def from_env(
+        cls,
+        *,
+        prompt_builder: PromptBuilder = default_prompt_builder,
+        **client_kwargs: Any,
+    ) -> GeminiAdapter:
+        try:
+            from google import genai
+        except ImportError as exc:
+            raise ImportError(
+                "Gemini adapter requires the optional 'google' dependency; "
+                "install agent-router[google]"
+            ) from exc
+        return cls(
+            client=genai.Client(**client_kwargs),
+            prompt_builder=prompt_builder,
+        )
+
+    def __call__(self, model: str, task: Task) -> ModelResponse:
+        response = self.client.models.generate_content(
+            model=model,
+            contents=self.prompt_builder(task),
+        )
+        usage = getattr(response, "usage_metadata", None)
+        text = getattr(response, "text", "")
+        return ModelResponse(
+            output=text if isinstance(text, str) else "",
+            input_tokens=_usage_value(usage, "prompt_token_count"),
+            output_tokens=_usage_value(usage, "candidates_token_count"),
+            metadata={
+                "response_id": getattr(response, "response_id", None),
+                "finish_reason": _gemini_finish_reason(getattr(response, "candidates", ())),
+            },
+        )
+
+
 def _usage_value(usage: Any, name: str) -> int:
     value = getattr(usage, name, 0) if usage is not None else 0
     return value if isinstance(value, int) else 0
@@ -158,3 +203,18 @@ def _anthropic_text(content: Any) -> str:
             if isinstance(text, str):
                 parts.append(text)
     return "".join(parts)
+
+
+def _gemini_finish_reason(candidates: Any) -> str | None:
+    """Normalize Gemini's ``FinishReason`` into a plain string.
+
+    The SDK enum subclasses ``str``, so it compares equal to its value but still
+    renders as ``FinishReason.STOP``. Unwrapping ``.value`` first keeps persisted
+    result metadata predictable.
+    """
+    candidate = next(iter(candidates or ()), None)
+    reason = getattr(candidate, "finish_reason", None)
+    if reason is None:
+        return None
+    value = getattr(reason, "value", reason)
+    return value if type(value) is str else str(value)

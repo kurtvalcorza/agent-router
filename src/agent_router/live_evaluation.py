@@ -9,7 +9,12 @@ from .empirical import EmpiricalSelector, EmpiricalSuccessModel
 from .empirical_executor import EmpiricalRoutedModelExecutor
 from .evaluation import EvaluationCase, EvaluationRun
 from .model_executor import RoutedModelExecutor
-from .providers import AnthropicMessagesAdapter, OpenAIResponsesAdapter, ProviderInvoker
+from .providers import (
+    AnthropicMessagesAdapter,
+    GeminiAdapter,
+    OpenAIResponsesAdapter,
+    ProviderInvoker,
+)
 from .runtime import RouterRuntime
 from .types import ExecutionClass, TelemetryEvent
 
@@ -21,7 +26,9 @@ def provider_invoker_from_catalog(catalog: ModelCatalog) -> ProviderInvoker:
         adapters["openai"] = OpenAIResponsesAdapter.from_env()
     if "anthropic" in providers:
         adapters["anthropic"] = AnthropicMessagesAdapter.from_env()
-    unsupported = providers - {"openai", "anthropic"}
+    if "google" in providers:
+        adapters["google"] = GeminiAdapter.from_env()
+    unsupported = providers - {"openai", "anthropic", "google"}
     if unsupported:
         raise RuntimeError(
             "live evaluation has no provider adapters for: " + ", ".join(sorted(unsupported))

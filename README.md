@@ -258,15 +258,23 @@ The core package has no provider SDK dependency. Install only the adapters you n
 ```bash
 python -m pip install 'agent-router[openai]'
 python -m pip install 'agent-router[anthropic]'
-# or both
+python -m pip install 'agent-router[google]'
+# or all three
 python -m pip install 'agent-router[providers]'
 ```
+
+Each adapter's `from_env()` constructs the provider SDK client, and the SDK reads its own
+credential from the process environment: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and — for Gemini —
+`GOOGLE_API_KEY` (or `GEMINI_API_KEY`; if both are set the Google SDK uses `GOOGLE_API_KEY` and
+warns). `agent-router` itself never reads a `.env` file, so export the variable in your shell or
+set it through your process manager.
 
 Adapters expose one common invocation contract through `ProviderInvoker`:
 
 ```python
 from agent_router import (
     AnthropicMessagesAdapter,
+    GeminiAdapter,
     OpenAIResponsesAdapter,
     ProviderInvoker,
     RoutedModelExecutor,
@@ -276,6 +284,7 @@ providers = ProviderInvoker(
     {
         "openai": OpenAIResponsesAdapter.from_env(),
         "anthropic": AnthropicMessagesAdapter.from_env(max_tokens=2048),
+        "google": GeminiAdapter.from_env(),
     }
 )
 
@@ -286,7 +295,7 @@ executor = RoutedModelExecutor(
 )
 ```
 
-`OpenAIResponsesAdapter` uses the Responses API and defaults to `store=False`. `AnthropicMessagesAdapter` uses the Messages API. Both normalize output text and input/output token usage into `ModelResponse`; provider-specific response IDs and stop metadata remain available in result metadata.
+`OpenAIResponsesAdapter` uses the Responses API and defaults to `store=False`. `AnthropicMessagesAdapter` uses the Messages API. `GeminiAdapter` uses `google-genai`'s `generate_content` API and maps `usage_metadata.prompt_token_count` / `candidates_token_count` onto the shared token fields. All three normalize output text and input/output token usage into `ModelResponse`; provider-specific response IDs and stop/finish metadata remain available in result metadata.
 
 ## Current capabilities
 
@@ -303,7 +312,7 @@ executor = RoutedModelExecutor(
 - remaining-budget filtering before model invocation
 - cheapest-eligible-model selection using estimated token cost
 - same-class provider/model fallback when an invocation fails
-- optional OpenAI Responses and Anthropic Messages adapters
+- optional OpenAI Responses, Anthropic Messages, and Google Gemini adapters
 - JSON/YAML declarative model catalogs
 - model aliases and catalog validation
 - dated pricing metadata and source provenance fields
