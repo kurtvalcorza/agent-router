@@ -172,6 +172,10 @@ def apply_proposals(
             "posterior_mean": proposal.get("posterior_mean"),
             "previous_reliability": current,
             "review_state": APPLIED_REVIEW_STATE,
+            # The knob settings the proposal was produced under. Absent only for
+            # proposals written before parameters were recorded; not synthesised
+            # from current defaults, which would misattribute a policy change.
+            "parameters": proposal.get("parameters"),
         }
         if proposal.get("warnings"):
             evidence["warnings"] = list(proposal["warnings"])

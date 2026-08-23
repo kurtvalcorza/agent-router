@@ -99,12 +99,75 @@ Enumerated because the breadth is the argument for speccing first:
 | `calibration.py` | proposals become per instance+model, not per model name |
 | examples, README, `docs/catalog-refresh.md` | new shape |
 
+## Settled: identity levels
+
+Decided 2026-08-23, before implementation. This was previously an open question; it is not.
+
+| level | key | role |
+| :--- | :--- | :--- |
+| model / weights | `name` | shrinkage identity — borrows strength across instances |
+| **execution identity** | `(provider_instance, name)` | **where evidence is collected** |
+| task-conditional | `(provider_instance, name, task_class)` | ranking signal |
+
+**Evidence is collected at the execution-identity level.** Two instances serving the same
+weights can differ in quantization, context limit, sampling defaults, hardware failure modes,
+and load. Pooling them into one empirical model is the same hidden boundary crossing that
+produced the credential leak and the lost update: a value silently crossing a line nobody
+checked. Sparse evidence is a reason for hierarchical shrinkage, not for collapsing two
+execution environments into one identity.
+
+**Shrinkage borrows strength from the model-name level.** A new instance of a known model
+starts from what that model generally does and moves as its own evidence accumulates. That
+preserves the statistical sharing without asserting the environments are interchangeable.
+
+Note this needs **no new catalog field**: the shrinkage group is the existing `name`, and the
+leaf is `(provider_instance, name)`. It does, however, make the empirical estimator three-level
+where it is two-level today, which is a change to `EmpiricalSuccessModel` and not merely a
+schema change. `feature_weight` becomes two weights needing separate justification.
+
+**Compound identity must be a first-class value, not a string.** No `"instance/model"` formatting
+at call sites. A dedicated frozen type with the two fields, used as the dict key and the
+serialized shape, so an aliasing bug is a type error rather than a silent match. String
+concatenation is exactly how `ollama-local/qwen3:8b` ends up accepting evidence gathered from
+`remote-vllm/qwen3:8b`.
+
+## Migration warning: every structure keyed by bare model name
+
+Each of these keys on `name` alone today. Each is a place where two instances of the same model
+silently alias, and each must be audited during implementation:
+
+| structure | where | failure if missed |
+| :--- | :--- | :--- |
+| calibration proposal `model` field | `calibration.py`, `calibration_io.py` | a proposal calibrated on one instance applies to another |
+| `by_name` lookup | `calibration_io.apply_proposals` | wrong profile updated |
+| stale-proposal check | `calibration_io.apply_proposals` | baseline compared against the wrong instance's value |
+| `reliability_evidence` | catalog metadata | provenance cannot say which endpoint produced the evidence |
+| `EmpiricalSuccessModel._global` | `empirical.py` | two instances pooled into one success rate |
+| `EmpiricalSuccessModel._feature` | `empirical.py` | same, per task class |
+| `ModelRegistry` lookups and aliases | `models.py`, `catalog.py` | an alias resolves to an ambiguous target |
+| `ExecutionResult.metadata["model"]` | `model_executor.py` | telemetry joins collapse instances |
+| benchmark `EvaluationRun.model` | `evaluation.py`, `records_io.py` | historical runs cannot be attributed |
+| `--accept` argument values | `cli.py` | accepting a name accepts every instance of it |
+
+The `--accept` row deserves particular attention: today `--accept qwen3:8b` names one model. Under
+instances it would silently accept every instance serving those weights unless the argument takes
+compound identities.
+
+**Migration semantics.** A bare name in a proposal or a run predates instances and cannot be
+attributed to one. It must be rejected on load rather than defaulted to an implicit instance --
+defaulting is precisely the silent aliasing this design exists to prevent. Historical evidence
+either gets re-attributed deliberately or is excluded from calibration.
+
 ## Open questions
 
-- **Does the empirical feature key include the instance?** Splitting evidence per instance is
-  more correct and halves the data behind each estimate. Probably yes, with shrinkage toward a
-  model-level rate, but that is a modelling decision, not a schema one.
 - **Do per-instance timeout/retry policies belong here?** They fit naturally, and they are also
   scope creep for a schema change. Recommend deferring until the identity change has landed.
 - **Should `kind` be inferred from the instance id when unambiguous?** Convenient, and exactly
   the kind of implicitness that made `provider` overloaded in the first place. Recommend not.
+
+## Sequencing
+
+Not to be implemented before the first real calibration benchmark. That run may show whether
+serving-instance effects are large enough to justify the extra estimator level immediately, or
+whether the two-level estimator is adequate for now. Building the identity change first would
+mean guessing at exactly the question the benchmark answers.

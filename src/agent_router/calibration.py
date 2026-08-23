@@ -36,6 +36,7 @@ __all__ = [
     "CALIBRATION_METHOD_VERSION",
     "DEFAULT_CREDIBLE_LEVEL",
     "DEFAULT_MIN_TRIALS",
+    "CalibrationParameters",
     "CalibrationProposal",
     "TaskClassEvidence",
     "calibrate_reliability",
@@ -57,6 +58,33 @@ _POLICY_FLOORS: tuple[tuple[str, float], ...] = (
     (PolicyMode.QUALITY.value, 0.90),
     (PolicyMode.CRITICAL.value, 0.97),
 )
+
+
+@dataclass(frozen=True, slots=True)
+class CalibrationParameters:
+    """The knob settings a proposal was produced under.
+
+    Recorded so a later comparison can tell a change in *evidence* from a change in
+    *policy parameters*. Several of these are experimental values chosen by judgement
+    rather than measurement -- ``min_trials`` and ``dominant_class_warning_share``
+    especially -- so sensitivity analysis needs them attached to the run, not
+    reconstructed afterwards from whatever the defaults happen to be by then.
+    """
+
+    credible_level: float
+    min_trials: int
+    prior_alpha: float
+    prior_beta: float
+    dominant_class_warning_share: float
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "credible_level": self.credible_level,
+            "min_trials": self.min_trials,
+            "prior_alpha": self.prior_alpha,
+            "prior_beta": self.prior_beta,
+            "dominant_class_warning_share": self.dominant_class_warning_share,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +141,7 @@ class CalibrationProposal:
     threshold_crossings: tuple[ThresholdCrossing, ...]
     evidence_ref: str
     status: str
+    parameters: CalibrationParameters
     warnings: tuple[str, ...] = field(default_factory=tuple)
     method: str = CALIBRATION_METHOD
     method_version: str = CALIBRATION_METHOD_VERSION
@@ -136,6 +165,7 @@ class CalibrationProposal:
             "threshold_crossings": [item.as_dict() for item in self.threshold_crossings],
             "evidence_ref": self.evidence_ref,
             "status": self.status,
+            "parameters": self.parameters.as_dict(),
             "warnings": list(self.warnings),
             "method": self.method,
             "method_version": self.method_version,
@@ -175,6 +205,14 @@ def calibrate_reliability(
     if not evidence_ref:
         raise ValueError("evidence_ref must be non-empty; a proposal without provenance "
                          "cannot be reviewed")
+
+    parameters = CalibrationParameters(
+        credible_level=credible_level,
+        min_trials=min_trials,
+        prior_alpha=prior_alpha,
+        prior_beta=prior_beta,
+        dominant_class_warning_share=dominant_class_warning_share,
+    )
 
     case_map = {case.id: case for case in cases}
     pooled: dict[str, list[int]] = defaultdict(lambda: [0, 0])
@@ -274,6 +312,7 @@ def calibrate_reliability(
                 threshold_crossings=_crossings(before, proposed),
                 evidence_ref=evidence_ref,
                 status="INSUFFICIENT_EVIDENCE" if trials < min_trials else "REVIEW_REQUIRED",
+                parameters=parameters,
                 warnings=tuple(warnings),
             )
         )

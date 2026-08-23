@@ -519,3 +519,109 @@ def test_apply_calibration_command_reports_staleness_and_writes_nothing(
     err = capsys.readouterr().err
     assert "STALE" in err
     assert "0.92" in err
+
+
+# --- parameter provenance -----------------------------------------------------
+#
+# The knobs are experimental values chosen by judgement, so a later comparison has to be
+# able to tell a change in EVIDENCE from a change in POLICY PARAMETERS. That is only
+# possible if the settings travel with the proposal and with the applied value.
+
+
+def test_proposal_records_the_parameters_it_was_produced_under() -> None:
+    cases, runs = _evidence({"m": [("classify", 40, 36), ("summarize", 16, 11)]})
+
+    (proposal,) = calibrate_reliability(
+        cases,
+        runs,
+        evidence_ref="run-1",
+        credible_level=0.80,
+        min_trials=30,
+        prior_alpha=2.0,
+        prior_beta=3.0,
+        dominant_class_warning_share=0.5,
+    )
+
+    assert proposal.parameters.credible_level == 0.80
+    assert proposal.parameters.min_trials == 30
+    assert proposal.parameters.prior_alpha == 2.0
+    assert proposal.parameters.prior_beta == 3.0
+    assert proposal.parameters.dominant_class_warning_share == 0.5
+    assert proposal.as_dict()["parameters"] == {
+        "credible_level": 0.80,
+        "min_trials": 30,
+        "prior_alpha": 2.0,
+        "prior_beta": 3.0,
+        "dominant_class_warning_share": 0.5,
+    }
+
+
+def test_recorded_parameters_are_the_ones_actually_used() -> None:
+    """A recorded value that did not drive the computation is worse than none."""
+    cases, runs = _evidence({"m": [("classify", 40, 36), ("summarize", 16, 11)]})
+
+    narrow = calibrate_reliability(cases, runs, evidence_ref="r", credible_level=0.50)[0]
+    wide = calibrate_reliability(cases, runs, evidence_ref="r", credible_level=0.99)[0]
+
+    # A wider credible level lowers the lower bound, so the proposals must differ.
+    assert wide.proposed_reliability < narrow.proposed_reliability
+    assert narrow.parameters.credible_level == 0.50
+    assert wide.parameters.credible_level == 0.99
+
+
+def test_parameters_survive_the_proposal_file_round_trip(tmp_path) -> None:
+    cases, runs = _evidence({"m": [("classify", 40, 36), ("summarize", 16, 11)]})
+    proposals = calibrate_reliability(cases, runs, evidence_ref="run-1", min_trials=25)
+    path = tmp_path / "proposals.json"
+
+    write_proposals(path, proposals)
+
+    assert load_proposals(path)[0]["parameters"]["min_trials"] == 25
+
+
+def test_applied_value_carries_the_parameters_into_catalog_provenance() -> None:
+    catalog = parse_catalog(CATALOG)
+    parameters = {
+        "credible_level": 0.90,
+        "min_trials": 20,
+        "prior_alpha": 1.0,
+        "prior_beta": 1.0,
+        "dominant_class_warning_share": 0.60,
+    }
+
+    result = apply_proposals(
+        catalog, [_proposal_dict(parameters=parameters)], accept=["m"]
+    )
+
+    evidence = result.catalog.registry().get("m").metadata["reliability_evidence"]
+    assert evidence["parameters"] == parameters
+
+
+def test_a_proposal_without_parameters_records_none_rather_than_current_defaults(
+) -> None:
+    """Synthesising the parameters from today's defaults would misattribute a policy
+    change as evidence produced under settings that were never used."""
+    catalog = parse_catalog(CATALOG)
+    proposal = _proposal_dict()
+    proposal.pop("parameters", None)
+
+    result = apply_proposals(catalog, [proposal], accept=["m"])
+
+    evidence = result.catalog.registry().get("m").metadata["reliability_evidence"]
+    assert "parameters" not in evidence
+
+
+def test_calibrate_command_emits_parameters(tmp_path, capsys) -> None:
+    cases_file, runs_file, catalog_file = _cli_fixtures(tmp_path)
+
+    code = main([
+        "evaluation", "calibrate",
+        "--cases", str(cases_file), "--runs", str(runs_file),
+        "--catalog", str(catalog_file), "--evidence-ref", "run-1",
+        "--credible-level", "0.8", "--min-trials", "30", "--json",
+    ])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload[0]["parameters"]["credible_level"] == 0.8
+    assert payload[0]["parameters"]["min_trials"] == 30
