@@ -62,6 +62,7 @@ from .provenance import InventoryRecord, PricingRecord, SourceProvenance
 from .providers import (
     AnthropicMessagesAdapter,
     GeminiAdapter,
+    OpenAIChatCompletionsAdapter,
     OpenAIResponsesAdapter,
     ProviderInvoker,
     UnknownProvider,
@@ -127,6 +128,7 @@ __all__ = [
     "NoEligibleModel",
     "OpenAIInventoryFetcher",
     "OpenAIModelPricingSource",
+    "OpenAIChatCompletionsAdapter",
     "OpenAIResponsesAdapter",
     "PolicyMode",
     "PricingProfile",

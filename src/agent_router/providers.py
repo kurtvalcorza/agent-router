@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -12,6 +13,7 @@ PromptBuilder = Callable[[Task], str]
 __all__ = [
     "AnthropicMessagesAdapter",
     "GeminiAdapter",
+    "OpenAIChatCompletionsAdapter",
     "OpenAIResponsesAdapter",
     "ProviderAdapter",
     "ProviderInvoker",
@@ -190,6 +192,85 @@ class GeminiAdapter:
         )
 
 
+@dataclass(slots=True)
+class OpenAIChatCompletionsAdapter:
+    """Adapter for any server speaking the OpenAI chat-completions API.
+
+    Distinct from :class:`OpenAIResponsesAdapter`, which uses the newer Responses API
+    that self-hosted servers generally do not implement. Pointing ``base_url`` at a
+    local runtime -- LiteRT-LM, Ollama, llama.cpp, vLLM, LM Studio -- routes work to it
+    through the same contract as a hosted provider.
+
+    Local servers commonly omit ``usage``; token counts then fall back to 0, which is
+    correct for a zero-priced catalog entry but means telemetry carries no token counts.
+    """
+
+    client: Any
+    prompt_builder: PromptBuilder = default_prompt_builder
+    max_tokens: int = 1024
+    system_prompt: str | None = None
+
+    @classmethod
+    def from_env(
+        cls,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        prompt_builder: PromptBuilder = default_prompt_builder,
+        max_tokens: int = 1024,
+        system_prompt: str | None = None,
+        **client_kwargs: Any,
+    ) -> OpenAIChatCompletionsAdapter:
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise ImportError(
+                "OpenAI-compatible chat adapter requires the optional 'openai' dependency; "
+                "install agent-router[openai]"
+            ) from exc
+
+        if base_url is not None:
+            client_kwargs["base_url"] = base_url
+            # A local runtime authenticates nobody, but the SDK still requires a key to
+            # construct. Only substitute a placeholder when the environment has none, so
+            # a real key is never silently overridden.
+            if api_key is None and not os.environ.get("OPENAI_API_KEY"):
+                api_key = "not-required-by-local-server"
+        if api_key is not None:
+            client_kwargs["api_key"] = api_key
+
+        return cls(
+            client=OpenAI(**client_kwargs),
+            prompt_builder=prompt_builder,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
+        )
+
+    def __call__(self, model: str, task: Task) -> ModelResponse:
+        messages: list[dict[str, str]] = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+        messages.append({"role": "user", "content": self.prompt_builder(task)})
+
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=self.max_tokens,
+        )
+        choice = next(iter(getattr(response, "choices", ()) or ()), None)
+        usage = getattr(response, "usage", None)
+        return ModelResponse(
+            output=_chat_text(choice),
+            # Chat completions names these differently from the Responses API.
+            input_tokens=_usage_value(usage, "prompt_tokens"),
+            output_tokens=_usage_value(usage, "completion_tokens"),
+            metadata={
+                "response_id": getattr(response, "id", None),
+                "finish_reason": getattr(choice, "finish_reason", None),
+            },
+        )
+
+
 def _usage_value(usage: Any, name: str) -> int:
     value = getattr(usage, name, 0) if usage is not None else 0
     return value if isinstance(value, int) else 0
@@ -218,3 +299,9 @@ def _gemini_finish_reason(candidates: Any) -> str | None:
         return None
     value = getattr(reason, "value", reason)
     return value if type(value) is str else str(value)
+
+
+def _chat_text(choice: Any) -> str:
+    message = getattr(choice, "message", None)
+    content = getattr(message, "content", None)
+    return content if isinstance(content, str) else ""
