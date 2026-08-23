@@ -61,6 +61,7 @@ from .pricing_sources import (
 from .provenance import InventoryRecord, PricingRecord, SourceProvenance
 from .providers import (
     AnthropicMessagesAdapter,
+    GeminiAdapter,
     OpenAIResponsesAdapter,
     ProviderInvoker,
     UnknownProvider,
@@ -93,6 +94,7 @@ __all__ = [
     "AdaptivePolicy",
     "AnthropicInventoryFetcher",
     "AnthropicMessagesAdapter",
+    "GeminiAdapter",
     "AnthropicPricingSource",
     "AvailabilityObservation",
     "AvailabilityStatus",

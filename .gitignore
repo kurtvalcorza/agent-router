@@ -11,3 +11,8 @@ build/
 htmlcov/
 .env
 .env.*
+
+# Locally created, locally reviewed production catalog. Never shipped;
+# `config/models.example.yaml` is the illustrative one. Use `git add -f` if
+# your deployment genuinely versions a reviewed catalog.
+config/models.yaml
