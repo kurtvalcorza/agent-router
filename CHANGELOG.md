@@ -17,6 +17,7 @@
 ### Changed
 
 - The `dev` extra now includes `PyYAML` so CI exercises the YAML catalog loader.
+- `config/models.yaml` is now git-ignored. It is the locally created, locally reviewed production catalog described in the README, so shipping one would present unreviewed reliability values as policy. `config/models.example.yaml` remains the illustrative catalog.
 
 ## 0.1.0 — 2026-08-18
 

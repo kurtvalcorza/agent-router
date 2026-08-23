@@ -180,6 +180,15 @@ cp config/models.example.yaml config/models.yaml
 # then replace the model names, pricing, reliability, and pricing source with reviewed values
 ```
 
+`config/models.yaml` is git-ignored: it is your reviewed catalog, not a shipped artifact.
+
+Verify model names with a real call rather than a listing. A provider's model list can
+advertise models your key cannot actually invoke -- Gemini's `models.list()` reports
+`generateContent` support for models that return `404 "no longer available to new users"`, and
+free-tier keys get `429` with `limit: 0` for pro-tier models. `reliability` is a local policy
+judgement and should come from your own evaluation evidence, never from provider marketing
+metadata.
+
 The commands in this section and in `docs/catalog-refresh.md` assume that `config/models.yaml`.
 Install provider extras and run the static router plus fixed baselines against the same corpus:
 
