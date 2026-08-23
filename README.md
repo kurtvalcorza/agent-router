@@ -146,6 +146,41 @@ agent-router catalog sync config/models.example.yaml snapshots.json \
 
 The commands above use the shipped `config/models.example.yaml` so they run against a clean checkout. In production, point them at your own reviewed catalog instead.
 
+### Delegating a subtask (`route`)
+
+`agent-router route` is a host-agnostic delegation entry point: any agent that can run a
+subprocess can ask it whether a subtask is worth handing to a cheaper model, and which one.
+No server, no per-host plugin.
+
+`--plan` is the default and **never calls a provider**:
+
+```bash
+agent-router route "Classify each ticket by urgency and product area."   --catalog config/models.yaml   --input-tokens 12000 --output-tokens 3000
+```
+
+```text
+DELEGATE: 15000 estimated tokens clears the 400-token threshold; gemini-3.5-flash-lite is the cheapest model meeting every constraint
+  execution class  : light_reasoning (task requires bounded semantic reasoning)
+  reliability floor: 0.82
+  estimated tokens : 12000 in / 3000 out
+  selected         : google/gemini-3.5-flash-lite (est. $0.000570)
+  alternative      : google/gemini-3.5-flash (est. $0.002430)
+```
+
+The command enforces a delegation threshold itself, because a caller pays its own tokens to
+ask. Below `--threshold-tokens` (default 400) it reports `DO NOT DELEGATE` rather than routing
+work that costs more to hand off than to do. `--json` emits the same decision machine-readably.
+
+`--execute` runs the task through the selected model and issues **real, billed provider calls**.
+It stays inert when the plan already said no, so a below-threshold task cannot spend by accident:
+
+```bash
+agent-router route - --catalog config/models.yaml --execute --max-cost-usd 0.02 < prompt.txt
+```
+
+`--requirements` defaults to `semantic_reasoning` and **replaces** rather than extends that
+default; add `high_reliability` to raise the reliability floor before cost ranking.
+
 ### Provider inventory and pricing
 
 ```bash
@@ -322,6 +357,7 @@ executor = RoutedModelExecutor(
 - cheapest-eligible-model selection using estimated token cost
 - same-class provider/model fallback when an invocation fails
 - optional OpenAI Responses, Anthropic Messages, and Google Gemini adapters
+- host-agnostic `route` delegation command with a plan/execute split and a delegation threshold
 - JSON/YAML declarative model catalogs
 - model aliases and catalog validation
 - dated pricing metadata and source provenance fields

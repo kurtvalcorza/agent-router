@@ -5,13 +5,22 @@ import json
 import sys
 from pathlib import Path
 
+from .adaptive import AdaptivePolicy, PolicyMode
 from .catalog import CatalogError, load_catalog
 from .catalog_sync import diff_catalogs, synchronize_catalog
+from .delegation import (
+    DEFAULT_DELEGATION_THRESHOLD_TOKENS,
+    estimate_tokens,
+    parse_requirements,
+    parse_risk,
+    plan_delegation,
+)
 from .empirical import EmpiricalSuccessModel
 from .empirical_io import EmpiricalModelIOError, write_empirical_model
 from .evaluation import compare_strategies, evaluate_gate, summarize_strategy
 from .evaluation_io import EvaluationIOError, load_cases, load_runs
 from .inventory import AnthropicInventoryFetcher, OpenAIInventoryFetcher
+from .model_executor import RoutedModelExecutor
 from .pricing_io import write_pricing_records
 from .pricing_sources import AnthropicPricingSource, OpenAIModelPricingSource, PricingSourceError
 from .reconcile import reconcile_records
@@ -23,13 +32,77 @@ from .records_io import (
     write_availability_state,
     write_inventory,
 )
+from .runtime import RouterRuntime
 from .serialize import write_catalog
 from .snapshot import SnapshotError, load_snapshots, write_snapshots
+from .types import Budget, ExecutionClass, Task
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agent-router")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    route = subparsers.add_parser(
+        "route",
+        help="decide which model should handle a task, and optionally run it",
+        description=(
+            "Host-agnostic delegation entry point. Defaults to --plan, which decides "
+            "and prints without calling any provider. --execute makes real, billed "
+            "provider calls."
+        ),
+    )
+    route.add_argument("prompt", nargs="?", help="task prompt; omit or pass - to read stdin")
+    route.add_argument("--catalog", required=True, help="path to a reviewed model catalog")
+    mode_group = route.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--plan",
+        dest="execute",
+        action="store_false",
+        help="decide only; no provider call, no spend (default)",
+    )
+    mode_group.add_argument(
+        "--execute",
+        dest="execute",
+        action="store_true",
+        help="run the task through the selected model; issues REAL billed provider calls",
+    )
+    route.set_defaults(execute=False)
+    route.add_argument(
+        "--requirements",
+        default="semantic_reasoning",
+        help=(
+            "comma-separated, e.g. semantic_reasoning,long_context. Defaults to "
+            "semantic_reasoning because a prose prompt handed to the router is "
+            "semantic work; passing this replaces the default rather than adding to it"
+        ),
+    )
+    route.add_argument("--risk", default="low", help="low, medium, or high (default: low)")
+    route.add_argument(
+        "--mode",
+        default="balanced",
+        choices=[m.value for m in PolicyMode],
+        help="adaptive policy mode (default: balanced)",
+    )
+    route.add_argument("--kind", default="subtask", help="task kind label (default: subtask)")
+    route.add_argument("--input-tokens", type=int, help="override the estimated input tokens")
+    route.add_argument("--output-tokens", type=int, help="override the estimated output tokens")
+    route.add_argument(
+        "--threshold-tokens",
+        type=int,
+        default=DEFAULT_DELEGATION_THRESHOLD_TOKENS,
+        help=(
+            "below this estimated total, report delegate=false because answering "
+            f"directly is cheaper (default: {DEFAULT_DELEGATION_THRESHOLD_TOKENS})"
+        ),
+    )
+    route.add_argument("--max-cost-usd", type=float, help="per-run cost ceiling")
+    route.add_argument(
+        "--max-model-calls",
+        type=int,
+        default=3,
+        help="per-run model-call ceiling",
+    )
+    route.add_argument("--json", action="store_true", help="emit machine-readable JSON")
 
     catalog = subparsers.add_parser("catalog", help="inspect and synchronize model catalogs")
     catalog_sub = catalog.add_subparsers(dest="catalog_command", required=True)
@@ -104,6 +177,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "route":
+            return _route_command(args)
+
         if args.command == "catalog" and args.catalog_command == "check":
             catalog = load_catalog(args.catalog)
             print(
@@ -291,6 +367,111 @@ def _print_diff(diff) -> int:
         print(f"~ {change.model} {change.field}: {change.before!r} -> {change.after!r}")
     return 1
 
+
+def _route_command(args) -> int:
+    prompt = args.prompt
+    if prompt is None or prompt == "-":
+        prompt = sys.stdin.read()
+    prompt = prompt.strip()
+    if not prompt:
+        print("route: empty prompt", file=sys.stderr)
+        return 2
+
+    requirements = parse_requirements(args.requirements)
+    risk = parse_risk(args.risk)
+
+    estimated_input, estimated_output = estimate_tokens(prompt)
+    if args.input_tokens is not None:
+        estimated_input = args.input_tokens
+    if args.output_tokens is not None:
+        estimated_output = args.output_tokens
+
+    task = Task(
+        kind=args.kind,
+        payload={"prompt": prompt},
+        requirements=requirements,
+        risk=risk,
+        metadata={
+            "estimated_input_tokens": estimated_input,
+            "estimated_output_tokens": estimated_output,
+        },
+    )
+
+    catalog = load_catalog(args.catalog)
+    adaptive_policy = AdaptivePolicy(PolicyMode(args.mode))
+    decision = plan_delegation(
+        task,
+        registry=catalog.registry(),
+        adaptive_policy=adaptive_policy,
+        threshold_tokens=args.threshold_tokens,
+        max_cost_usd=args.max_cost_usd,
+    )
+
+    payload = decision.as_dict()
+    payload["executed"] = False
+
+    # A plan never invokes a provider, and neither does an --execute run that the
+    # threshold or eligibility check already rejected.
+    if args.execute and decision.delegate:
+        payload.update(_execute_routed(task, catalog, adaptive_policy, args))
+        payload["executed"] = True
+
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+    else:
+        _print_route(payload)
+    return 0
+
+
+def _execute_routed(task, catalog, adaptive_policy, args) -> dict:
+    from .live_evaluation import provider_invoker_from_catalog
+
+    executor = RoutedModelExecutor(
+        registry=catalog.registry(),
+        invoke=provider_invoker_from_catalog(catalog),
+        adaptive_policy=adaptive_policy,
+    )
+    runtime = RouterRuntime()
+    for execution_class in (ExecutionClass.LIGHT_REASONING, ExecutionClass.DEEP_REASONING):
+        runtime.register_executor(execution_class, executor)
+
+    budget = Budget(max_cost_usd=args.max_cost_usd, max_model_calls=args.max_model_calls)
+    result = runtime.execute(task, budget=budget)
+    return {
+        "output": result.output,
+        "actual_cost_usd": budget.cost_usd,
+        "model_calls": budget.model_calls,
+        "executed_model": result.metadata.get("model"),
+        "executed_provider": result.metadata.get("provider"),
+    }
+
+
+def _print_route(payload: dict) -> None:
+    verdict = "DELEGATE" if payload["delegate"] else "DO NOT DELEGATE"
+    print(f"{verdict}: {payload['reason']}")
+    print(f"  execution class  : {payload['execution_class']} ({payload['routing_reason']})")
+    print(f"  reliability floor: {payload['reliability_floor']:.2f}")
+    print(
+        f"  estimated tokens : {payload['estimated_input_tokens']} in / "
+        f"{payload['estimated_output_tokens']} out"
+    )
+    if payload.get("model"):
+        print(
+            f"  selected         : {payload['provider']}/{payload['model']} "
+            f"(est. ${payload['estimated_cost_usd']:.6f})"
+        )
+    for alt in payload.get("alternatives", ()):
+        print(
+            f"  alternative      : {alt['provider']}/{alt['model']} "
+            f"(est. ${alt['estimated_cost_usd']:.6f})"
+        )
+    if payload.get("executed"):
+        print(
+            f"  ACTUAL           : {payload['executed_provider']}/{payload['executed_model']} "
+            f"${payload['actual_cost_usd']:.6f} in {payload['model_calls']} call(s)"
+        )
+        print()
+        print(payload["output"])
 
 if __name__ == "__main__":
     raise SystemExit(main())
