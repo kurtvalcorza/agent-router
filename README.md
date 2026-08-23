@@ -379,8 +379,12 @@ returning an error status. Declaring the real limit turns that failure mode into
 routing rule.
 
 The `local` provider defaults to `http://127.0.0.1:9379/v1` (LiteRT-LM's port). Override with
-`AGENT_ROUTER_LOCAL_BASE_URL`. Local servers generally need no credential; the adapter supplies a
-placeholder only when `OPENAI_API_KEY` is unset, so a real key is never overridden.
+`AGENT_ROUTER_LOCAL_BASE_URL`. **Setting `base_url` deliberately severs the credential path to `OPENAI_API_KEY`.** That
+variable is never read for a custom endpoint, because doing so would put your real OpenAI
+credential in an `Authorization` header addressed to whatever host `base_url` names. Supply a
+credential for a non-OpenAI endpoint explicitly, or through `AGENT_ROUTER_LOCAL_API_KEY`;
+otherwise a harmless placeholder is sent, which local servers ignore. Calls with no `base_url`
+still resolve `OPENAI_API_KEY` through the SDK as usual.
 
 Verified against two runtimes, which disagree on optional fields in ways worth knowing:
 

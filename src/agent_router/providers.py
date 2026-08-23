@@ -10,7 +10,14 @@ from .types import Task
 
 PromptBuilder = Callable[[Task], str]
 
+# Credential for a self-hosted / non-OpenAI endpoint. Kept separate from
+# OPENAI_API_KEY so pointing base_url elsewhere can never transmit the OpenAI one.
+LOCAL_API_KEY_ENV = "AGENT_ROUTER_LOCAL_API_KEY"
+PLACEHOLDER_API_KEY = "not-required-by-local-server"  # noqa: S105 - not a credential
+
 __all__ = [
+    "LOCAL_API_KEY_ENV",
+    "PLACEHOLDER_API_KEY",
     "AnthropicMessagesAdapter",
     "GeminiAdapter",
     "OpenAIChatCompletionsAdapter",
@@ -203,6 +210,10 @@ class OpenAIChatCompletionsAdapter:
 
     Local servers commonly omit ``usage``; token counts then fall back to 0, which is
     correct for a zero-priced catalog entry but means telemetry carries no token counts.
+
+    When ``base_url`` is set, ``OPENAI_API_KEY`` is deliberately **not** consulted -- see
+    :meth:`from_env`. Supply a credential for a non-OpenAI endpoint explicitly or through
+    ``AGENT_ROUTER_LOCAL_API_KEY``.
     """
 
     client: Any
@@ -231,11 +242,15 @@ class OpenAIChatCompletionsAdapter:
 
         if base_url is not None:
             client_kwargs["base_url"] = base_url
-            # A local runtime authenticates nobody, but the SDK still requires a key to
-            # construct. Only substitute a placeholder when the environment has none, so
-            # a real key is never silently overridden.
-            if api_key is None and not os.environ.get("OPENAI_API_KEY"):
-                api_key = "not-required-by-local-server"
+            if api_key is None:
+                # SECURITY: never fall through to the SDK's own OPENAI_API_KEY lookup
+                # here. base_url points somewhere that is not OpenAI, and letting the
+                # SDK resolve the key itself would put the caller's real OpenAI
+                # credential in an Authorization header sent to that host. A credential
+                # for a non-OpenAI endpoint must be supplied deliberately -- explicitly,
+                # or through the dedicated variable -- and otherwise a harmless
+                # placeholder is used, because the SDK requires some key to construct.
+                api_key = os.environ.get(LOCAL_API_KEY_ENV) or PLACEHOLDER_API_KEY
         if api_key is not None:
             client_kwargs["api_key"] = api_key
 

@@ -1,4 +1,7 @@
 import json
+import os
+import sys
+import types
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +12,7 @@ from agent_router import (
 )
 from agent_router.catalog import parse_catalog
 from agent_router.delegation import plan_delegation
+from agent_router.providers import LOCAL_API_KEY_ENV, PLACEHOLDER_API_KEY
 from agent_router.types import Requirement, Risk
 
 
@@ -236,3 +240,88 @@ def test_local_catalog_round_trips_through_json() -> None:
     profile = catalog.registry().get("qwen3-4b-instruct")
     assert profile.provider == "local"
     assert profile.estimate_cost(input_tokens=100_000, output_tokens=100_000) == 0.0
+
+
+# --- credential boundary ------------------------------------------------------
+#
+# Regression tests for a real leak: base_url points at a non-OpenAI host, so if the
+# SDK is left to resolve the key itself it puts the caller's real OPENAI_API_KEY in an
+# Authorization header addressed to that host. These fail against the previous code.
+
+REAL_KEY = "sk-real-openai-key-do-not-transmit"
+
+
+class _RecordingOpenAI:
+    """Captures what from_env hands the SDK constructor."""
+
+    last_kwargs: dict = {}
+
+    def __init__(self, **kwargs):
+        type(self).last_kwargs = dict(kwargs)
+        # Mirror the SDK: with no explicit api_key it resolves one from the environment.
+        if "api_key" not in kwargs:
+            type(self).last_kwargs["api_key"] = os.environ.get("OPENAI_API_KEY")
+
+
+@pytest.fixture
+def fake_openai(monkeypatch):
+    module = types.ModuleType("openai")
+    module.OpenAI = _RecordingOpenAI
+    _RecordingOpenAI.last_kwargs = {}
+    monkeypatch.setitem(sys.modules, "openai", module)
+    return _RecordingOpenAI
+
+
+def test_local_base_url_never_transmits_the_real_openai_key(fake_openai, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", REAL_KEY)
+    monkeypatch.delenv(LOCAL_API_KEY_ENV, raising=False)
+
+    OpenAIChatCompletionsAdapter.from_env(base_url="http://127.0.0.1:11434/v1")
+
+    sent = fake_openai.last_kwargs["api_key"]
+    assert sent != REAL_KEY, "real OPENAI_API_KEY must never reach a custom base_url"
+    assert sent == PLACEHOLDER_API_KEY
+    assert fake_openai.last_kwargs["base_url"] == "http://127.0.0.1:11434/v1"
+
+
+def test_dedicated_local_key_is_used_when_set(fake_openai, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", REAL_KEY)
+    monkeypatch.setenv(LOCAL_API_KEY_ENV, "local-secret")
+
+    OpenAIChatCompletionsAdapter.from_env(base_url="http://127.0.0.1:11434/v1")
+
+    assert fake_openai.last_kwargs["api_key"] == "local-secret"
+
+
+def test_explicit_api_key_wins_over_both_environment_variables(fake_openai, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", REAL_KEY)
+    monkeypatch.setenv(LOCAL_API_KEY_ENV, "local-secret")
+
+    OpenAIChatCompletionsAdapter.from_env(
+        base_url="http://127.0.0.1:11434/v1", api_key="explicit"
+    )
+
+    assert fake_openai.last_kwargs["api_key"] == "explicit"
+
+
+def test_without_base_url_the_sdk_still_resolves_openai_key_normally(
+    fake_openai, monkeypatch
+) -> None:
+    """Hosted OpenAI use is unaffected: no base_url means no severed credential path."""
+    monkeypatch.setenv("OPENAI_API_KEY", REAL_KEY)
+    monkeypatch.delenv(LOCAL_API_KEY_ENV, raising=False)
+
+    OpenAIChatCompletionsAdapter.from_env()
+
+    assert "base_url" not in fake_openai.last_kwargs
+    assert fake_openai.last_kwargs["api_key"] == REAL_KEY
+
+
+def test_empty_local_key_falls_back_to_the_placeholder(fake_openai, monkeypatch) -> None:
+    """An empty variable must not be forwarded as a credential."""
+    monkeypatch.setenv("OPENAI_API_KEY", REAL_KEY)
+    monkeypatch.setenv(LOCAL_API_KEY_ENV, "")
+
+    OpenAIChatCompletionsAdapter.from_env(base_url="http://127.0.0.1:9379/v1")
+
+    assert fake_openai.last_kwargs["api_key"] == PLACEHOLDER_API_KEY
