@@ -379,7 +379,20 @@ metadata:
     credible_interval: [0.74064, 0.90161]
     previous_reliability: 0.8
     review_state: applied-by-explicit-action
+    parameters:
+      credible_level: 0.9
+      min_trials: 20
+      prior_alpha: 1.0
+      prior_beta: 1.0
+      dominant_class_warning_share: 0.6
 ```
+
+`parameters` records the knob settings the proposal was produced under, and travels with it into
+the catalog. `min_trials` and `dominant_class_warning_share` in particular are experimental values
+chosen by judgement rather than measurement, so a later comparison needs them attached to the run:
+without them, a changed proposal cannot be attributed to new *evidence* rather than a changed
+*policy parameter*. They are never synthesised from current defaults when absent, since that would
+misattribute settings that were never used.
 
 Calibrating a **local** model costs nothing, which is convenient, because it is the model whose
 reliability is most load-bearing: it is the one a zero price cannot gate.
