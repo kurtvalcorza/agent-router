@@ -12,6 +12,7 @@
 - `examples/quickstart.py`: runs hard-policy routing, adaptive reliability floors, cheapest-eligible selection, and verification-driven escalation with a stub invoker, so the router can be evaluated without provider credentials or spend. Covered by `tests/test_quickstart_example.py`.
 - README now states that `agent-router-benchmark` issues real, billed provider calls and cannot run against the placeholder example catalog.
 - `GeminiAdapter`: Google Gemini execution adapter built on the `google-genai` SDK's `generate_content` API, available through the new `google` extra. It follows the same injected-client contract as the OpenAI and Anthropic adapters, normalizes `usage_metadata` token counts, and unwraps the `finish_reason` enum into result metadata.
+- `agent-router route`: a host-agnostic delegation entry point. `--plan` (the default) decides whether a subtask is worth handing to a cheaper model and which one, without invoking any provider; `--execute` runs it. A delegation threshold lives in the command rather than in each caller, because an agent pays its own tokens to ask. Backed by the new `agent_router.delegation` module (`plan_delegation`, `DelegationDecision`, `estimate_tokens`).
 - `provider_invoker_from_catalog` now builds a Gemini adapter for catalogs naming the `google` provider; unsupported providers still fail closed.
 
 ### Changed
