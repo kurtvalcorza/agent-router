@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 
 from .adaptive import AdaptivePolicy, PolicyMode
@@ -12,11 +13,14 @@ from .model_executor import RoutedModelExecutor
 from .providers import (
     AnthropicMessagesAdapter,
     GeminiAdapter,
+    OpenAIChatCompletionsAdapter,
     OpenAIResponsesAdapter,
     ProviderInvoker,
 )
 from .runtime import RouterRuntime
 from .types import ExecutionClass, TelemetryEvent
+
+DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:9379/v1"
 
 
 def provider_invoker_from_catalog(catalog: ModelCatalog) -> ProviderInvoker:
@@ -28,7 +32,13 @@ def provider_invoker_from_catalog(catalog: ModelCatalog) -> ProviderInvoker:
         adapters["anthropic"] = AnthropicMessagesAdapter.from_env()
     if "google" in providers:
         adapters["google"] = GeminiAdapter.from_env()
-    unsupported = providers - {"openai", "anthropic", "google"}
+    if "local" in providers:
+        # Any OpenAI-compatible server: LiteRT-LM, Ollama, llama.cpp, vLLM, LM Studio.
+        # The default matches LiteRT-LM's shipped port so a local catalog works unset.
+        adapters["local"] = OpenAIChatCompletionsAdapter.from_env(
+            base_url=os.environ.get("AGENT_ROUTER_LOCAL_BASE_URL", DEFAULT_LOCAL_BASE_URL),
+        )
+    unsupported = providers - {"openai", "anthropic", "google", "local"}
     if unsupported:
         raise RuntimeError(
             "live evaluation has no provider adapters for: " + ", ".join(sorted(unsupported))

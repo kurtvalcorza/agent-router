@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -9,9 +10,17 @@ from .types import Task
 
 PromptBuilder = Callable[[Task], str]
 
+# Credential for a self-hosted / non-OpenAI endpoint. Kept separate from
+# OPENAI_API_KEY so pointing base_url elsewhere can never transmit the OpenAI one.
+LOCAL_API_KEY_ENV = "AGENT_ROUTER_LOCAL_API_KEY"
+PLACEHOLDER_API_KEY = "not-required-by-local-server"  # noqa: S105 - not a credential
+
 __all__ = [
+    "LOCAL_API_KEY_ENV",
+    "PLACEHOLDER_API_KEY",
     "AnthropicMessagesAdapter",
     "GeminiAdapter",
+    "OpenAIChatCompletionsAdapter",
     "OpenAIResponsesAdapter",
     "ProviderAdapter",
     "ProviderInvoker",
@@ -190,6 +199,93 @@ class GeminiAdapter:
         )
 
 
+@dataclass(slots=True)
+class OpenAIChatCompletionsAdapter:
+    """Adapter for any server speaking the OpenAI chat-completions API.
+
+    Distinct from :class:`OpenAIResponsesAdapter`, which uses the newer Responses API
+    that self-hosted servers generally do not implement. Pointing ``base_url`` at a
+    local runtime -- LiteRT-LM, Ollama, llama.cpp, vLLM, LM Studio -- routes work to it
+    through the same contract as a hosted provider.
+
+    Local servers commonly omit ``usage``; token counts then fall back to 0, which is
+    correct for a zero-priced catalog entry but means telemetry carries no token counts.
+
+    When ``base_url`` is set, ``OPENAI_API_KEY`` is deliberately **not** consulted -- see
+    :meth:`from_env`. Supply a credential for a non-OpenAI endpoint explicitly or through
+    ``AGENT_ROUTER_LOCAL_API_KEY``.
+    """
+
+    client: Any
+    prompt_builder: PromptBuilder = default_prompt_builder
+    max_tokens: int = 1024
+    system_prompt: str | None = None
+
+    @classmethod
+    def from_env(
+        cls,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        prompt_builder: PromptBuilder = default_prompt_builder,
+        max_tokens: int = 1024,
+        system_prompt: str | None = None,
+        **client_kwargs: Any,
+    ) -> OpenAIChatCompletionsAdapter:
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise ImportError(
+                "OpenAI-compatible chat adapter requires the optional 'openai' dependency; "
+                "install agent-router[openai]"
+            ) from exc
+
+        if base_url is not None:
+            client_kwargs["base_url"] = base_url
+            if api_key is None:
+                # SECURITY: never fall through to the SDK's own OPENAI_API_KEY lookup
+                # here. base_url points somewhere that is not OpenAI, and letting the
+                # SDK resolve the key itself would put the caller's real OpenAI
+                # credential in an Authorization header sent to that host. A credential
+                # for a non-OpenAI endpoint must be supplied deliberately -- explicitly,
+                # or through the dedicated variable -- and otherwise a harmless
+                # placeholder is used, because the SDK requires some key to construct.
+                api_key = os.environ.get(LOCAL_API_KEY_ENV) or PLACEHOLDER_API_KEY
+        if api_key is not None:
+            client_kwargs["api_key"] = api_key
+
+        return cls(
+            client=OpenAI(**client_kwargs),
+            prompt_builder=prompt_builder,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
+        )
+
+    def __call__(self, model: str, task: Task) -> ModelResponse:
+        messages: list[dict[str, str]] = []
+        if self.system_prompt:
+            messages.append({"role": "system", "content": self.system_prompt})
+        messages.append({"role": "user", "content": self.prompt_builder(task)})
+
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=self.max_tokens,
+        )
+        choice = next(iter(getattr(response, "choices", ()) or ()), None)
+        usage = getattr(response, "usage", None)
+        return ModelResponse(
+            output=_chat_text(choice),
+            # Chat completions names these differently from the Responses API.
+            input_tokens=_usage_value(usage, "prompt_tokens"),
+            output_tokens=_usage_value(usage, "completion_tokens"),
+            metadata={
+                "response_id": getattr(response, "id", None),
+                "finish_reason": getattr(choice, "finish_reason", None),
+            },
+        )
+
+
 def _usage_value(usage: Any, name: str) -> int:
     value = getattr(usage, name, 0) if usage is not None else 0
     return value if isinstance(value, int) else 0
@@ -218,3 +314,9 @@ def _gemini_finish_reason(candidates: Any) -> str | None:
         return None
     value = getattr(reason, "value", reason)
     return value if type(value) is str else str(value)
+
+
+def _chat_text(choice: Any) -> str:
+    message = getattr(choice, "message", None)
+    content = getattr(message, "content", None)
+    return content if isinstance(content, str) else ""

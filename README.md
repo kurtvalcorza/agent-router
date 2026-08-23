@@ -307,6 +307,10 @@ python -m pip install 'agent-router[google]'
 python -m pip install 'agent-router[providers]'
 ```
 
+The `openai` extra also covers self-hosted runtimes: `OpenAIChatCompletionsAdapter` speaks the
+OpenAI chat-completions API, so it drives LiteRT-LM, Ollama, llama.cpp, vLLM, or LM Studio
+through the same contract as a hosted provider.
+
 Each adapter's `from_env()` constructs the provider SDK client, and the SDK reads its own
 credential from the process environment: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and — for Gemini —
 `GOOGLE_API_KEY` (or `GEMINI_API_KEY`; if both are set the Google SDK uses `GOOGLE_API_KEY` and
@@ -339,7 +343,66 @@ executor = RoutedModelExecutor(
 )
 ```
 
-`OpenAIResponsesAdapter` uses the Responses API and defaults to `store=False`. `AnthropicMessagesAdapter` uses the Messages API. `GeminiAdapter` uses `google-genai`'s `generate_content` API and maps `usage_metadata.prompt_token_count` / `candidates_token_count` onto the shared token fields. All three normalize output text and input/output token usage into `ModelResponse`; provider-specific response IDs and stop/finish metadata remain available in result metadata.
+`OpenAIResponsesAdapter` uses the Responses API and defaults to `store=False`. `OpenAIChatCompletionsAdapter` uses the older chat-completions API, which is what self-hosted servers implement, and takes a `base_url`; it maps `prompt_tokens`/`completion_tokens` onto the shared token fields and tolerates a missing `usage` block, which local runtimes routinely omit. `AnthropicMessagesAdapter` uses the Messages API. `GeminiAdapter` uses `google-genai`'s `generate_content` API and maps `usage_metadata.prompt_token_count` / `candidates_token_count` onto the shared token fields. All three normalize output text and input/output token usage into `ModelResponse`; provider-specific response IDs and stop/finish metadata remain available in result metadata.
+
+## Local and self-hosted models
+
+A local runtime is just another provider. `config/models.local.example.yaml` shows a tiered
+catalog -- free local, then cheap cloud, then strong cloud -- and documents the one property
+that makes such a catalog behave:
+
+> A zero-priced model is **always** the cheapest eligible candidate, so cost ranking can never
+> gate it. Only `context_window`, `reliability`, and `capabilities` can.
+
+Set those three honestly and routing becomes a ladder:
+
+```bash
+# small, low-stakes -> the free local model
+agent-router route "Summarize this paragraph." \
+  --catalog config/models.local.example.yaml --mode economy \
+  --input-tokens 800 --output-tokens 200
+```
+
+```text
+DELEGATE: 1000 estimated tokens clears the 400-token threshold; qwen3-4b-instruct is the cheapest model meeting every constraint
+  selected         : local/qwen3-4b-instruct (est. $0.000000)
+  alternative      : google/cloud-flash-lite (est. $0.000740)
+```
+
+Raise the prompt past the local model's `context_window` and it drops out of the ranking
+entirely; require `high_reliability` and the floor excludes it before cost is considered.
+
+`context_window` deserves particular care for a local runtime: it is the **serving** limit, not
+the model's native context. LiteRT-LM 0.14.0 runs at a fixed `max_num_tokens=4096` whatever the
+model card says, and a prompt past its practical ceiling breaks the HTTP response rather than
+returning an error status. Declaring the real limit turns that failure mode into an ordinary
+routing rule.
+
+The `local` provider defaults to `http://127.0.0.1:9379/v1` (LiteRT-LM's port). Override with
+`AGENT_ROUTER_LOCAL_BASE_URL`. **Setting `base_url` deliberately severs the credential path to `OPENAI_API_KEY`.** That
+variable is never read for a custom endpoint, because doing so would put your real OpenAI
+credential in an `Authorization` header addressed to whatever host `base_url` names. Supply a
+credential for a non-OpenAI endpoint explicitly, or through `AGENT_ROUTER_LOCAL_API_KEY`;
+otherwise a harmless placeholder is sent, which local servers ignore. Calls with no `base_url`
+still resolve `OPENAI_API_KEY` through the SDK as usual.
+
+Verified against two runtimes, which disagree on optional fields in ways worth knowing:
+
+| | LiteRT-LM 0.14.0 (`:9379`) | Ollama (`:11434`) |
+| :--- | :--- | :--- |
+| `usage` block | absent -- tokens degrade to `0` | present |
+| reasoning tokens | n/a | counted in `completion_tokens`, absent from the text |
+
+Both are handled, but they have consequences. Missing `usage` means telemetry carries no token
+counts for that runtime -- harmless at zero price, misleading if you ever price it. And a
+reasoning model bills for tokens you never see: a one-word answer from `qwen3:8b` reported 151
+completion tokens. Cost estimates for such a model must be based on its *total* output, not the
+visible reply.
+
+**One `local` provider means one base URL.** `provider_invoker_from_catalog` builds a single
+`local` adapter, so a catalog cannot currently point two entries at two different servers. Running
+LiteRT-LM and Ollama side by side means choosing one per run via `AGENT_ROUTER_LOCAL_BASE_URL`, or
+constructing the `ProviderInvoker` yourself with one adapter per provider name.
 
 ## Current capabilities
 
@@ -357,6 +420,7 @@ executor = RoutedModelExecutor(
 - cheapest-eligible-model selection using estimated token cost
 - same-class provider/model fallback when an invocation fails
 - optional OpenAI Responses, Anthropic Messages, and Google Gemini adapters
+- OpenAI-compatible chat-completions adapter for self-hosted runtimes (LiteRT-LM, Ollama, llama.cpp, vLLM, LM Studio)
 - host-agnostic `route` delegation command with a plan/execute split and a delegation threshold
 - JSON/YAML declarative model catalogs
 - model aliases and catalog validation
