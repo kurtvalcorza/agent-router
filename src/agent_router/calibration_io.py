@@ -7,6 +7,7 @@ catalog it is given: like ``catalog sync``, it produces a *candidate* for review
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -17,6 +18,7 @@ from .catalog import ModelCatalog
 __all__ = [
     "AppliedCalibration",
     "CalibrationIOError",
+    "StaleProposalError",
     "apply_proposals",
     "load_proposals",
     "write_proposals",
@@ -29,6 +31,32 @@ APPLIED_REVIEW_STATE = "applied-by-explicit-action"
 
 class CalibrationIOError(RuntimeError):
     pass
+
+
+class StaleProposalError(CalibrationIOError):
+    """An accepted proposal was calibrated against a different catalog value.
+
+    Optimistic concurrency: a proposal records the reliability it was reviewed against.
+    If the catalog has moved since, applying would silently overwrite the newer value
+    with a decision made about an older one.
+
+    Raised before anything is built, and covers the whole accepted set rather than the
+    offending entries alone -- the set was reviewed together against one catalog state,
+    so if that state moved the review is suspect in full.
+    """
+
+    def __init__(self, mismatches: Sequence[tuple[str, float | None, float]]) -> None:
+        self.mismatches = tuple(mismatches)
+        detail = "; ".join(
+            f"{name}: proposal was calibrated against "
+            + ("no recorded baseline" if expected is None else f"{expected}")
+            + f", catalog now holds {actual}"
+            for name, expected, actual in self.mismatches
+        )
+        super().__init__(
+            "stale calibration proposal(s), nothing applied -- "
+            f"{detail}. Re-run 'evaluation calibrate' against the current catalog."
+        )
 
 
 def write_proposals(path: str | Path, proposals: Iterable[CalibrationProposal]) -> None:
@@ -95,7 +123,9 @@ def apply_proposals(
     applied: list[tuple[str, float, float]] = []
     skipped: list[tuple[str, str]] = []
     updates: dict[str, tuple[float, dict]] = {}
+    stale: list[tuple[str, float | None, float]] = []
 
+    candidates = []
     for proposal in proposals:
         name = proposal["model"]
         if not (accept_all or name in accepted_names):
@@ -104,6 +134,26 @@ def apply_proposals(
         if name not in by_name:
             skipped.append((name, "not present in the catalog"))
             continue
+
+        # Optimistic concurrency, checked before status: a proposal reviewed against a
+        # stale value is invalid whatever its evidence looked like. A proposal with no
+        # recorded baseline cannot be checked at all, which is equally disqualifying --
+        # re-run calibrate with --catalog rather than applying it blind.
+        expected = proposal.get("current_reliability")
+        actual = by_name[name].reliability
+        if expected is None or not math.isclose(
+            float(expected), actual, rel_tol=0.0, abs_tol=1e-9
+        ):
+            stale.append((name, None if expected is None else float(expected), actual))
+            continue
+
+        candidates.append(proposal)
+
+    if stale:
+        raise StaleProposalError(stale)
+
+    for proposal in candidates:
+        name = proposal["model"]
         status = proposal.get("status")
         if status != "REVIEW_REQUIRED" and not allow_insufficient_evidence:
             skipped.append((name, f"status {status!r}"))

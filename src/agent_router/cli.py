@@ -12,6 +12,7 @@ from .calibration import (
     calibrate_reliability,
 )
 from .calibration_io import (
+    StaleProposalError,
     apply_proposals,
     load_proposals,
     write_proposals,
@@ -197,7 +198,12 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate.add_argument("--runs", required=True)
     calibrate.add_argument(
         "--catalog",
-        help="optional; supplies current reliability so the diff and threshold crossings show",
+        required=True,
+        help=(
+            "the catalog being calibrated. Required: the proposal records the reliability "
+            "it was reviewed against, and 'apply-calibration' refuses a proposal it cannot "
+            "check for staleness"
+        ),
     )
     calibrate.add_argument(
         "--evidence-ref",
@@ -552,12 +558,10 @@ def _calibrate_command(args) -> int:
     cases = load_cases(args.cases)
     runs = load_runs(args.runs)
 
-    current = None
-    if args.catalog:
-        current = {
-            profile.name: profile.reliability
-            for profile in load_catalog(args.catalog).profiles
-        }
+    current = {
+        profile.name: profile.reliability
+        for profile in load_catalog(args.catalog).profiles
+    }
 
     proposals = calibrate_reliability(
         cases,
@@ -632,13 +636,32 @@ def _apply_calibration_command(args) -> int:
         else:
             accept = args.accept
 
-    result = apply_proposals(
-        catalog,
-        proposals,
-        accept=accept,
-        accept_all=accept_all,
-        allow_insufficient_evidence=args.allow_insufficient_evidence,
-    )
+    try:
+        result = apply_proposals(
+            catalog,
+            proposals,
+            accept=accept,
+            accept_all=accept_all,
+            allow_insufficient_evidence=args.allow_insufficient_evidence,
+        )
+    except StaleProposalError as exc:
+        # Nothing was written. Report every mismatch rather than only the first, so one
+        # re-calibration round can fix them all.
+        print(
+            "STALE: the catalog has moved since these proposals were calibrated.",
+            file=sys.stderr,
+        )
+        for name, expected, actual in exc.mismatches:
+            baseline = "no recorded baseline" if expected is None else f"{expected}"
+            print(
+                f"  {name}: calibrated against {baseline}, catalog now holds {actual}",
+                file=sys.stderr,
+            )
+        print(
+            "Nothing applied. Re-run 'evaluation calibrate' against the current catalog.",
+            file=sys.stderr,
+        )
+        return 1
 
     for name, before, after in result.applied:
         print(f"~ {name} reliability: {before} -> {after}")

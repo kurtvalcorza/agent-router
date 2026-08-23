@@ -351,8 +351,22 @@ agent-router catalog apply-calibration config/models.yaml .agent-router/proposal
 ```
 
 Nothing is applied without `--accept` naming models (or `--accept all`), and proposals marked
-`INSUFFICIENT_EVIDENCE` are skipped unless `--allow-insufficient-evidence` is passed. Each
-applied value carries its provenance into the candidate catalog:
+`INSUFFICIENT_EVIDENCE` are skipped unless `--allow-insufficient-evidence` is passed.
+
+**Applying is guarded against stale proposals.** A proposal records the reliability it was
+reviewed against, and application refuses if the catalog has moved since -- otherwise a decision
+made about `0.80` could silently overwrite a newer `0.92`. The check covers the whole accepted
+set: if any proposal is stale, nothing is applied, because the set was reviewed together against
+one catalog state. This is why `--catalog` is required at calibration time; a proposal with no
+recorded baseline cannot be checked and is refused.
+
+```text
+STALE: the catalog has moved since these proposals were calibrated.
+  qwen3:8b: calibrated against 0.8, catalog now holds 0.92
+Nothing applied. Re-run 'evaluation calibrate' against the current catalog.
+```
+
+Each applied value carries its provenance into the candidate catalog:
 
 ```yaml
 metadata:

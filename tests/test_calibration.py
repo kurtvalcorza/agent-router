@@ -11,6 +11,7 @@ from agent_router.calibration import (
 )
 from agent_router.calibration_io import (
     CalibrationIOError,
+    StaleProposalError,
     apply_proposals,
     load_proposals,
     write_proposals,
@@ -216,6 +217,7 @@ CATALOG = {
 def _proposal_dict(**overrides):
     base = {
         "model": "m",
+        "current_reliability": 0.80,
         "proposed_reliability": 0.741,
         "status": "REVIEW_REQUIRED",
         "evidence_ref": "run-1",
@@ -365,7 +367,7 @@ def test_apply_calibration_refuses_without_accept(tmp_path, capsys) -> None:
     proposals = tmp_path / "proposals.json"
     main([
         "evaluation", "calibrate", "--cases", str(cases_file), "--runs", str(runs_file),
-        "--evidence-ref", "run-1", "--output", str(proposals),
+        "--catalog", str(catalog_file), "--evidence-ref", "run-1", "--output", str(proposals),
     ])
     capsys.readouterr()
 
@@ -386,7 +388,7 @@ def test_apply_calibration_writes_a_candidate_and_leaves_the_source_alone(
     proposals = tmp_path / "proposals.json"
     main([
         "evaluation", "calibrate", "--cases", str(cases_file), "--runs", str(runs_file),
-        "--evidence-ref", "run-1", "--output", str(proposals),
+        "--catalog", str(catalog_file), "--evidence-ref", "run-1", "--output", str(proposals),
     ])
     capsys.readouterr()
     before = catalog_file.read_text(encoding="utf-8")
@@ -403,3 +405,117 @@ def test_apply_calibration_writes_a_candidate_and_leaves_the_source_alone(
     model = next(item for item in written["models"] if item["name"] == "m")
     assert model["reliability"] < 0.80
     assert model["metadata"]["reliability_evidence"]["evidence_ref"] == "run-1"
+
+
+# --- optimistic concurrency ---------------------------------------------------
+#
+# A proposal records the reliability it was reviewed against. Applying it to a catalog
+# that has since moved would overwrite a newer value with a decision made about an older
+# one -- a lost update. These fail against the pre-guard implementation.
+
+
+def test_stale_proposal_is_refused_rather_than_overwriting_a_newer_value() -> None:
+    """The catalog moved 0.80 -> 0.92 after the proposal was reviewed."""
+    moved = json.loads(json.dumps(CATALOG))
+    moved["models"][0]["reliability"] = 0.92
+    catalog = parse_catalog(moved)
+
+    with pytest.raises(StaleProposalError) as excinfo:
+        apply_proposals(catalog, [_proposal_dict()], accept=["m"])
+
+    assert excinfo.value.mismatches == (("m", 0.80, 0.92),)
+    assert "0.92" in str(excinfo.value)
+    assert catalog.registry().get("m").reliability == 0.92
+
+
+def test_a_proposal_without_a_recorded_baseline_cannot_be_verified() -> None:
+    """calibrate without --catalog records no baseline; applying it blind is refused."""
+    catalog = parse_catalog(CATALOG)
+
+    with pytest.raises(StaleProposalError) as excinfo:
+        apply_proposals(catalog, [_proposal_dict(current_reliability=None)], accept=["m"])
+
+    assert excinfo.value.mismatches == (("m", None, 0.80),)
+    assert "no recorded baseline" in str(excinfo.value)
+
+
+def test_one_stale_proposal_aborts_the_whole_set() -> None:
+    """The set was reviewed together against one catalog state, so a partial apply would
+    build a candidate from a mix of fresh and stale decisions."""
+    two_models = json.loads(json.dumps(CATALOG))
+    two_models["models"].append(
+        {
+            "name": "n",
+            "provider": "local",
+            "execution_classes": ["light_reasoning"],
+            "capabilities": ["semantic_reasoning"],
+            "reliability": 0.55,
+            "context_window": 8192,
+            "pricing": {"input_per_million": 0.0, "output_per_million": 0.0},
+        }
+    )
+    catalog = parse_catalog(two_models)
+    proposals = [
+        _proposal_dict(),  # fresh: baseline 0.80 matches
+        _proposal_dict(model="n", current_reliability=0.40),  # stale: catalog holds 0.55
+    ]
+
+    with pytest.raises(StaleProposalError) as excinfo:
+        apply_proposals(catalog, proposals, accept_all=True)
+
+    assert [name for name, _, _ in excinfo.value.mismatches] == ["n"]
+    # Nothing applied, including the fresh one.
+    assert catalog.registry().get("m").reliability == 0.80
+
+
+def test_staleness_is_not_reported_for_proposals_that_were_not_accepted() -> None:
+    """An unaccepted proposal is irrelevant, stale or not."""
+    moved = json.loads(json.dumps(CATALOG))
+    moved["models"][0]["reliability"] = 0.92
+
+    result = apply_proposals(parse_catalog(moved), [_proposal_dict()])
+
+    assert result.applied == ()
+    assert result.skipped == (("m", "not accepted"),)
+
+
+def test_staleness_tolerates_float_representation_noise() -> None:
+    """A value that round-tripped through JSON must still match."""
+    catalog = parse_catalog(CATALOG)
+    baseline = json.loads(json.dumps(0.80))
+
+    result = apply_proposals(
+        catalog, [_proposal_dict(current_reliability=baseline)], accept=["m"]
+    )
+
+    assert result.applied == (("m", 0.80, 0.741),)
+
+
+def test_apply_calibration_command_reports_staleness_and_writes_nothing(
+    tmp_path, capsys
+) -> None:
+    cases_file, runs_file, catalog_file = _cli_fixtures(tmp_path)
+    proposals = tmp_path / "proposals.json"
+    main([
+        "evaluation", "calibrate", "--cases", str(cases_file), "--runs", str(runs_file),
+        "--catalog", str(catalog_file), "--evidence-ref", "run-1",
+        "--output", str(proposals),
+    ])
+    capsys.readouterr()
+
+    # Someone else raises reliability between calibration and application.
+    moved = json.loads(catalog_file.read_text(encoding="utf-8"))
+    moved["models"][0]["reliability"] = 0.92
+    catalog_file.write_text(json.dumps(moved), encoding="utf-8")
+    candidate = tmp_path / "candidate.json"
+
+    code = main([
+        "catalog", "apply-calibration", str(catalog_file), str(proposals),
+        "--output", str(candidate), "--accept", "all",
+    ])
+
+    assert code == 1
+    assert not candidate.exists()
+    err = capsys.readouterr().err
+    assert "STALE" in err
+    assert "0.92" in err
