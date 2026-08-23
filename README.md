@@ -382,6 +382,24 @@ The `local` provider defaults to `http://127.0.0.1:9379/v1` (LiteRT-LM's port). 
 `AGENT_ROUTER_LOCAL_BASE_URL`. Local servers generally need no credential; the adapter supplies a
 placeholder only when `OPENAI_API_KEY` is unset, so a real key is never overridden.
 
+Verified against two runtimes, which disagree on optional fields in ways worth knowing:
+
+| | LiteRT-LM 0.14.0 (`:9379`) | Ollama (`:11434`) |
+| :--- | :--- | :--- |
+| `usage` block | absent -- tokens degrade to `0` | present |
+| reasoning tokens | n/a | counted in `completion_tokens`, absent from the text |
+
+Both are handled, but they have consequences. Missing `usage` means telemetry carries no token
+counts for that runtime -- harmless at zero price, misleading if you ever price it. And a
+reasoning model bills for tokens you never see: a one-word answer from `qwen3:8b` reported 151
+completion tokens. Cost estimates for such a model must be based on its *total* output, not the
+visible reply.
+
+**One `local` provider means one base URL.** `provider_invoker_from_catalog` builds a single
+`local` adapter, so a catalog cannot currently point two entries at two different servers. Running
+LiteRT-LM and Ollama side by side means choosing one per run via `AGENT_ROUTER_LOCAL_BASE_URL`, or
+constructing the `ProviderInvoker` yourself with one adapter per provider name.
+
 ## Current capabilities
 
 - task and capability models
