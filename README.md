@@ -295,6 +295,106 @@ expected_total_cost = call_cost + P(failure) × recovery_cost
 
 `--recovery-cost-multiplier` can tune how aggressively the router penalizes likely recovery/escalation work. The selected model, empirical success probability, feature key, and expected total cost are retained in result metadata for auditability.
 
+## Reliability calibration
+
+`reliability` is not configuration. It decides whether a model may enter a policy tier at
+all, so a guessed value silently encodes routing behaviour -- and a zero-cost local model is
+gated by nothing else. `evaluation calibrate` turns benchmark evidence into a **proposal** for
+that number.
+
+Measurement and policy approval stay separate:
+
+```text
+benchmark runs -> empirical fit -> calibration proposal -> review -> catalog update
+```
+
+Neither `evaluation calibrate` nor `evaluation train-empirical` may modify a catalog.
+
+```bash
+agent-router evaluation calibrate \
+  --cases benchmarks/cases.json --runs benchmarks/runs.json \
+  --catalog config/models.yaml \
+  --evidence-ref benchmark-run-2026-08-23 \
+  --output .agent-router/proposals.json
+```
+
+```text
+qwen3:8b: 0.800 -> 0.741  [REVIEW_REQUIRED]
+  evidence   : 47/56, posterior mean 0.828, credible 0.741-0.902
+  aggregation: min(lower bound 0.741, class-balanced 0.774)
+  coverage   : kind=classify|risk=low|requirements=semantic_reasoning -> 36/40 (0.881)
+  coverage   : kind=summarize|risk=low|requirements=semantic_reasoning -> 11/16 (0.667)
+  warning    : 71% of trials come from one task class; the corpus is skewed
+```
+
+The proposal is deliberately **below** the posterior mean. A small corpus skewed toward easy
+cases would otherwise promote a model across a policy floor on thin evidence, so the proposed
+value is the lower of the pooled posterior's credible lower bound and the mean of the
+per-task-class posteriors, weighting each observed class equally. Both inputs are printed, so
+the conservatism is inspectable rather than implicit. Coverage is printed for the same reason:
+a number derived from one task class says nothing about task shapes that were never
+benchmarked.
+
+When a proposal moves a model across a policy floor, that is called out explicitly -- it is the
+change that alters which tiers may route to the model at all:
+
+```text
+  THRESHOLD  : LOSES eligibility in quality (floor 0.90)
+```
+
+Applying is a separate act, and never touches the catalog you point it at:
+
+```bash
+agent-router catalog apply-calibration config/models.yaml .agent-router/proposals.json \
+  --output config/models.candidate.yaml \
+  --accept qwen3:8b
+```
+
+Nothing is applied without `--accept` naming models (or `--accept all`), and proposals marked
+`INSUFFICIENT_EVIDENCE` are skipped unless `--allow-insufficient-evidence` is passed.
+
+**Applying is guarded against stale proposals.** A proposal records the reliability it was
+reviewed against, and application refuses if the catalog has moved since -- otherwise a decision
+made about `0.80` could silently overwrite a newer `0.92`. The check covers the whole accepted
+set: if any proposal is stale, nothing is applied, because the set was reviewed together against
+one catalog state. This is why `--catalog` is required at calibration time; a proposal with no
+recorded baseline cannot be checked and is refused.
+
+```text
+STALE: the catalog has moved since these proposals were calibrated.
+  qwen3:8b: calibrated against 0.8, catalog now holds 0.92
+Nothing applied. Re-run 'evaluation calibrate' against the current catalog.
+```
+
+Each applied value carries its provenance into the candidate catalog:
+
+```yaml
+metadata:
+  reliability_evidence:
+    evidence_ref: benchmark-run-2026-08-23
+    method: beta-posterior-conservative
+    method_version: "1"
+    successes: 47
+    trials: 56
+    credible_interval: [0.74064, 0.90161]
+    previous_reliability: 0.8
+    review_state: applied-by-explicit-action
+```
+
+Calibrating a **local** model costs nothing, which is convenient, because it is the model whose
+reliability is most load-bearing: it is the one a zero price cannot gate.
+
+### Two different numbers
+
+| | catalog `reliability` | `EmpiricalSuccessModel` |
+| :--- | :--- | :--- |
+| answers | may this model enter this tier at all? | given this task shape, how likely is success? |
+| scope | model-level eligibility prior | task-conditional ranking signal |
+| changes | rarely, under review | refit freely from run history |
+
+The empirical executor applies the catalog floor **before** empirical ranking, so adopting
+`empirical-router` does not remove the need for a calibrated `reliability`.
+
 ## Provider adapters
 
 The core package has no provider SDK dependency. Install only the adapters you need:
@@ -422,6 +522,7 @@ constructing the `ProviderInvoker` yourself with one adapter per provider name.
 - optional OpenAI Responses, Anthropic Messages, and Google Gemini adapters
 - OpenAI-compatible chat-completions adapter for self-hosted runtimes (LiteRT-LM, Ollama, llama.cpp, vLLM, LM Studio)
 - host-agnostic `route` delegation command with a plan/execute split and a delegation threshold
+- evidence-backed reliability calibration proposals, gated behind explicit review
 - JSON/YAML declarative model catalogs
 - model aliases and catalog validation
 - dated pricing metadata and source provenance fields

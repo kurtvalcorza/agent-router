@@ -6,6 +6,17 @@ import sys
 from pathlib import Path
 
 from .adaptive import AdaptivePolicy, PolicyMode
+from .calibration import (
+    DEFAULT_CREDIBLE_LEVEL,
+    DEFAULT_MIN_TRIALS,
+    calibrate_reliability,
+)
+from .calibration_io import (
+    StaleProposalError,
+    apply_proposals,
+    load_proposals,
+    write_proposals,
+)
 from .catalog import CatalogError, load_catalog
 from .catalog_sync import diff_catalogs, synchronize_catalog
 from .delegation import (
@@ -107,6 +118,29 @@ def build_parser() -> argparse.ArgumentParser:
     catalog = subparsers.add_parser("catalog", help="inspect and synchronize model catalogs")
     catalog_sub = catalog.add_subparsers(dest="catalog_command", required=True)
 
+    apply_calibration = catalog_sub.add_parser(
+        "apply-calibration",
+        help="apply accepted reliability proposals to a NEW candidate catalog",
+        description=(
+            "Applies reviewed calibration proposals. The source catalog is never "
+            "modified: a candidate is written for review, as with 'catalog sync'. "
+            "Acceptance is explicit -- nothing is applied without --accept."
+        ),
+    )
+    apply_calibration.add_argument("catalog")
+    apply_calibration.add_argument("proposals", help="JSON emitted by 'evaluation calibrate'")
+    apply_calibration.add_argument("--output", required=True, help="candidate catalog to write")
+    apply_calibration.add_argument(
+        "--accept",
+        nargs="+",
+        help="model names to accept, or the single word 'all'",
+    )
+    apply_calibration.add_argument(
+        "--allow-insufficient-evidence",
+        action="store_true",
+        help="also apply proposals whose status is not REVIEW_REQUIRED",
+    )
+
     check = catalog_sub.add_parser("check", help="validate a catalog")
     check.add_argument("catalog")
 
@@ -150,6 +184,47 @@ def build_parser() -> argparse.ArgumentParser:
         "evaluation", help="train, summarize, and gate benchmark results"
     )
     evaluation_sub = evaluation.add_subparsers(dest="evaluation_command", required=True)
+
+    calibrate = evaluation_sub.add_parser(
+        "calibrate",
+        help="propose catalog reliability values from benchmark evidence",
+        description=(
+            "Derives an evidence-backed reliability proposal per model. It PROPOSES "
+            "only: no catalog is read for writing and none is modified. Apply accepted "
+            "proposals with 'catalog apply-calibration'."
+        ),
+    )
+    calibrate.add_argument("--cases", required=True)
+    calibrate.add_argument("--runs", required=True)
+    calibrate.add_argument(
+        "--catalog",
+        required=True,
+        help=(
+            "the catalog being calibrated. Required: the proposal records the reliability "
+            "it was reviewed against, and 'apply-calibration' refuses a proposal it cannot "
+            "check for staleness"
+        ),
+    )
+    calibrate.add_argument(
+        "--evidence-ref",
+        required=True,
+        help="provenance for the evidence, e.g. a benchmark run id; a proposal without "
+        "one cannot be reviewed",
+    )
+    calibrate.add_argument(
+        "--credible-level",
+        type=float,
+        default=DEFAULT_CREDIBLE_LEVEL,
+        help=f"credible interval width (default: {DEFAULT_CREDIBLE_LEVEL})",
+    )
+    calibrate.add_argument(
+        "--min-trials",
+        type=int,
+        default=DEFAULT_MIN_TRIALS,
+        help=f"below this, status is INSUFFICIENT_EVIDENCE (default: {DEFAULT_MIN_TRIALS})",
+    )
+    calibrate.add_argument("--output", help="write the proposals as JSON")
+    calibrate.add_argument("--json", action="store_true", help="print machine-readable JSON")
     report = evaluation_sub.add_parser("report", help="compare a strategy with a baseline")
     report.add_argument("--cases", required=True)
     report.add_argument("--runs", required=True)
@@ -177,6 +252,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "evaluation" and args.evaluation_command == "calibrate":
+            return _calibrate_command(args)
+
+        if args.command == "catalog" and args.catalog_command == "apply-calibration":
+            return _apply_calibration_command(args)
+
         if args.command == "route":
             return _route_command(args)
 
@@ -472,6 +553,129 @@ def _print_route(payload: dict) -> None:
         )
         print()
         print(payload["output"])
+
+def _calibrate_command(args) -> int:
+    cases = load_cases(args.cases)
+    runs = load_runs(args.runs)
+
+    current = {
+        profile.name: profile.reliability
+        for profile in load_catalog(args.catalog).profiles
+    }
+
+    proposals = calibrate_reliability(
+        cases,
+        runs,
+        current_reliability=current,
+        evidence_ref=args.evidence_ref,
+        credible_level=args.credible_level,
+        min_trials=args.min_trials,
+    )
+
+    if args.output:
+        write_proposals(args.output, proposals)
+
+    if args.json:
+        print(json.dumps([p.as_dict() for p in proposals], indent=2, sort_keys=True))
+    else:
+        _print_proposals(proposals, output=args.output)
+    return 0
+
+
+def _print_proposals(proposals, *, output=None) -> None:
+    if not proposals:
+        print("no models observed in the supplied runs")
+        return
+    for proposal in proposals:
+        current = (
+            f"{proposal.current_reliability:.3f}"
+            if proposal.current_reliability is not None
+            else "unset"
+        )
+        print(
+            f"{proposal.model}: {current} -> "
+            f"{proposal.proposed_reliability:.3f}  [{proposal.status}]"
+        )
+        print(
+            f"  evidence   : {proposal.successes}/{proposal.trials}, posterior mean "
+            f"{proposal.posterior_mean:.3f}, credible "
+            f"{proposal.credible_interval[0]:.3f}-{proposal.credible_interval[1]:.3f}"
+        )
+        print(
+            f"  aggregation: min(lower bound {proposal.pooled_lower_bound:.3f}, "
+            f"class-balanced {proposal.task_class_balanced_mean:.3f})"
+        )
+        for item in proposal.coverage:
+            print(
+                f"  coverage   : {item.task_class} -> "
+                f"{item.successes}/{item.trials} ({item.posterior_mean:.3f})"
+            )
+        for crossing in proposal.threshold_crossings:
+            direction = "GAINS" if crossing.eligible_after else "LOSES"
+            print(
+                f"  THRESHOLD  : {direction} eligibility in {crossing.mode} "
+                f"(floor {crossing.floor:.2f})"
+            )
+        for warning in proposal.warnings:
+            print(f"  warning    : {warning}")
+        print()
+    print("Proposals only. Apply with: agent-router catalog apply-calibration")
+    if output:
+        print(f"written to {output}")
+
+
+def _apply_calibration_command(args) -> int:
+    catalog = load_catalog(args.catalog)
+    proposals = load_proposals(args.proposals)
+
+    accept = None
+    accept_all = False
+    if args.accept:
+        if len(args.accept) == 1 and args.accept[0] == "all":
+            accept_all = True
+        else:
+            accept = args.accept
+
+    try:
+        result = apply_proposals(
+            catalog,
+            proposals,
+            accept=accept,
+            accept_all=accept_all,
+            allow_insufficient_evidence=args.allow_insufficient_evidence,
+        )
+    except StaleProposalError as exc:
+        # Nothing was written. Report every mismatch rather than only the first, so one
+        # re-calibration round can fix them all.
+        print(
+            "STALE: the catalog has moved since these proposals were calibrated.",
+            file=sys.stderr,
+        )
+        for name, expected, actual in exc.mismatches:
+            baseline = "no recorded baseline" if expected is None else f"{expected}"
+            print(
+                f"  {name}: calibrated against {baseline}, catalog now holds {actual}",
+                file=sys.stderr,
+            )
+        print(
+            "Nothing applied. Re-run 'evaluation calibrate' against the current catalog.",
+            file=sys.stderr,
+        )
+        return 1
+
+    for name, before, after in result.applied:
+        print(f"~ {name} reliability: {before} -> {after}")
+    for name, reason in result.skipped:
+        print(f"- {name} skipped: {reason}")
+
+    if not result.applied:
+        print("nothing applied; name models with --accept, or --accept all")
+        return 1
+
+    write_catalog(args.output, result.catalog)
+    print(f"candidate written to {args.output}")
+    print("The source catalog was not modified. Review the candidate before promoting it.")
+    return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
